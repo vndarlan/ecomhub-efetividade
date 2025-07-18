@@ -151,27 +151,161 @@ def login_ecomhub(driver):
             
         raise e
 
+import requests
+import urllib.parse
+import json
+
+def get_auth_cookies(driver):
+    """Obter cookies de autenticação após login"""
+    cookies = driver.get_cookies()
+    session_cookies = {}
+    
+    for cookie in cookies:
+        session_cookies[cookie['name']] = cookie['value']
+    
+    logger.info(f"✅ Cookies obtidos: {list(session_cookies.keys())}")
+    return session_cookies
+
+def extract_via_api(driver, data_inicio, data_fim, pais_id):
+    """Extrai dados via API direta do EcomHub"""
+    logger.info("🚀 Extraindo via API direta...")
+    
+    # Obter cookies após login
+    cookies = get_auth_cookies(driver)
+    
+    # Construir parâmetros da API (igual à API real)
+    conditions = {
+        "orders": {
+            "date": {
+                "start": data_inicio,
+                "end": data_fim
+            },
+            "shippingCountry_id": int(pais_id)  # NÚMERO, não string
+        }
+    }
+    
+    # URL da API
+    api_url = "https://api.ecomhub.app/api/orders"
+    params = {
+        "offset": 0,
+        "orderBy": "null",
+        "orderDirection": "null", 
+        "conditions": json.dumps(conditions),
+        "search": ""
+    }
+    
+    headers = {
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Content-Type": "application/json",
+        "Origin": "https://go.ecomhub.app",
+        "Referer": "https://go.ecomhub.app/",
+        "Sec-Ch-Ua": '"Google Chrome";v="137", "Chromium";v="137", "Not/A)Brand";v="24"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors", 
+        "Sec-Fetch-Site": "same-site",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+    }
+    
+    logger.info(f"🔍 Conditions JSON: {json.dumps(conditions)}")
+    logger.info(f"🔍 Params: {params}")
+    
+    all_orders = []
+    offset = 0
+    
+    while True:
+        params["offset"] = offset
+        
+        try:
+            logger.info(f"📡 Chamando API offset={offset}...")
+            
+            # Testar primeiro sem cookies
+            response_test = requests.get(api_url, params=params, headers=headers)
+            logger.info(f"🧪 Teste SEM cookies - Status: {response_test.status_code}")
+            
+            response = requests.get(api_url, params=params, headers=headers, cookies=cookies)
+            
+            logger.info(f"🔍 API URL completa: {response.url}")
+            logger.info(f"🔍 Status Code: {response.status_code}")
+            logger.info(f"🔍 Response completo: {response.text}")
+            
+            if response.status_code != 200:
+                logger.error(f"❌ API erro {response.status_code}: {response.text}")
+                break
+                
+            # API retorna array direto, não objeto com "data"
+            orders = response.json() if response.text.strip().startswith('[') else response.json().get("data", [])
+            
+            if not orders:
+                logger.info("📡 Sem mais dados - parando")
+                break
+                
+            logger.info(f"📡 Recebidos {len(orders)} pedidos")
+            
+            # Processar pedidos da API
+            for order in orders:
+                try:
+                    # Extrair produto do caminho correto
+                    produto = "Produto Desconhecido"
+                    
+                    # Caminho: ordersItems[0].productsVariants.products.name
+                    orders_items = order.get("ordersItems", [])
+                    if orders_items and len(orders_items) > 0:
+                        variants = orders_items[0].get("productsVariants", {})
+                        products = variants.get("products", {})
+                        produto = products.get("name", produto)
+                    
+                    order_data = {
+                        'numero_pedido': order.get('shopifyOrderNumber', ''),
+                        'produto': produto,
+                        'data': order.get('createdAt', ''),
+                        'pais': order.get('shippingCountry', ''),
+                        'preco': order.get('price', ''),
+                        'status': order.get('status', ''),
+                        'loja': order.get('stores', {}).get('name', '')
+                    }
+                    
+                    all_orders.append(order_data)
+                    
+                except Exception as e:
+                    logger.warning(f"Erro ao processar pedido API: {e}")
+                    continue
+            
+            offset += len(orders)
+            
+            # Limite de segurança
+            if offset > 10000:
+                logger.warning("⚠️ Limite de 10k pedidos atingido")
+                break
+                
+        except Exception as e:
+            logger.error(f"❌ Erro na chamada API: {e}")
+            break
+    
+    logger.info(f"✅ Total extraído via API: {len(all_orders)} pedidos")
+    return all_orders
+
 def extract_all_pages_data(driver, data_inicio, data_fim, pais_id):
-    """Extrai dados de todas as páginas com paginação"""
+    """Extrai dados de todas as páginas com produto real"""
     logger.info(f"Extraindo todos os pedidos: {data_inicio} até {data_fim}, País ID: {pais_id}")
     
     all_orders = []
     page = 0
     
     while True:
-        # Construir URL com página atual
         orders_url = f"https://go.ecomhub.app/orders?conditions.orders.date.start={data_inicio}&conditions.orders.date.end={data_fim}&conditions.orders.shippingCountry_id={pais_id}&page={page}"
         
         logger.info(f"📄 Processando página {page}...")
         driver.get(orders_url)
         
-        # Aguardar tabela carregar
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
         time.sleep(3)
         
-        # Extrair dados da página atual
         rows = driver.find_elements(By.CSS_SELECTOR, "tr.has-rowAction")
         
         if len(rows) == 0:
@@ -180,15 +314,18 @@ def extract_all_pages_data(driver, data_inicio, data_fim, pais_id):
             
         logger.info(f"📄 Página {page}: {len(rows)} pedidos encontrados")
         
-        # Processar cada linha da página atual
         page_orders = []
-        for row in rows:
+        for i, row in enumerate(rows):
             try:
                 cells = row.find_elements(By.CSS_SELECTOR, "td")
                 if len(cells) >= 7:
+                    # Pegar URL do pedido para extrair produto real
+                    order_link = cells[0].find_element(By.TAG_NAME, "a")
+                    order_url = order_link.get_attribute("href")
+                    
                     order_data = {
                         'numero_pedido': cells[0].text.strip(),
-                        'produto': cells[1].text.strip(),
+                        'loja': cells[1].text.strip(),  # Esta é a loja
                         'data': cells[2].text.strip(),
                         'warehouse': cells[3].text.strip(),
                         'pais': cells[4].text.strip(),
@@ -197,10 +334,13 @@ def extract_all_pages_data(driver, data_inicio, data_fim, pais_id):
                         'pagina': page
                     }
                     
-                    # Extrair nome do produto do link se existir
-                    link_element = cells[1].find_element(By.TAG_NAME, "a") if cells[1].find_elements(By.TAG_NAME, "a") else None
-                    if link_element:
-                        order_data['produto'] = link_element.text.strip()
+                    # Extrair produto real (mais lento)
+                    if i < 5:  # Só primeiros 5 por página para teste
+                        produto_real = extract_product_details(driver, order_url)
+                        order_data['produto'] = produto_real
+                        logger.info(f"   Produto extraído: {produto_real}")
+                    else:
+                        order_data['produto'] = order_data['loja']  # Fallback
                     
                     page_orders.append(order_data)
             except Exception as e:
@@ -210,12 +350,10 @@ def extract_all_pages_data(driver, data_inicio, data_fim, pais_id):
         all_orders.extend(page_orders)
         logger.info(f"📄 Página {page}: {len(page_orders)} pedidos válidos extraídos")
         
-        # Próxima página
         page += 1
         
-        # Limite de segurança para evitar loop infinito
-        if page > 50:
-            logger.warning("⚠️ Limite de 50 páginas atingido - parando")
+        if page > 10:  # Limite reduzido por ser mais lento
+            logger.warning("⚠️ Limite de 10 páginas atingido")
             break
     
     logger.info(f"✅ Total extraído: {len(all_orders)} pedidos de {page} páginas")
@@ -377,8 +515,8 @@ async def processar_ecomhub(request: ProcessRequest):
         # Fazer login
         login_ecomhub(driver)
         
-        # Extrair dados de todas as páginas
-        orders_data = extract_all_pages_data(driver, request.data_inicio, request.data_fim, request.pais_id)
+        # Extrair dados via API direta
+        orders_data = extract_via_api(driver, request.data_inicio, request.data_fim, request.pais_id)
         
         if not orders_data:
             logger.warning("Nenhum pedido encontrado")

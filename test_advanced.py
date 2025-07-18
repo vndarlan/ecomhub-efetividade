@@ -1,4 +1,3 @@
-# test_advanced.py - Teste mais robusto
 import requests
 import time
 import json
@@ -6,104 +5,94 @@ import json
 def test_server_connection():
     """Testa se o servidor está rodando"""
     try:
-        print("🔍 Testando conexão com servidor...")
+        print("🔍 Testando conexão...")
         response = requests.get("http://localhost:8001", timeout=5)
         if response.status_code == 200:
-            print("✅ Servidor está rodando!")
-            print(f"📊 Resposta: {response.json()}")
+            print("✅ Servidor rodando!")
             return True
         else:
-            print(f"❌ Servidor respondeu com status: {response.status_code}")
+            print(f"❌ Status: {response.status_code}")
             return False
     except requests.exceptions.ConnectionError:
-        print("❌ ERRO: Servidor não está rodando na porta 8001")
-        print("💡 Execute primeiro: python main.py")
-        return False
-    except Exception as e:
-        print(f"❌ Erro inesperado: {e}")
+        print("❌ Servidor não rodando na porta 8001")
+        print("💡 Execute: python main.py")
         return False
 
-def test_selenium_automation():
-    """Testa a automação Selenium"""
-    print("\n🤖 Iniciando teste da automação Selenium...")
+def test_api_automation():
+    """Testa automação via API"""
+    print("\n🚀 Testando automação híbrida (Selenium + API)...")
     
     data = {
-        "data_inicio": "2025-07-10", 
+        "data_inicio": "2025-07-14", 
         "data_fim": "2025-07-17",
-        "pais_id": "164"  # Espanha
+        "pais_id": "164"
     }
     
-    print(f"📋 Dados do teste: {json.dumps(data, indent=2)}")
-    print("⏳ Enviando requisição... (pode demorar alguns minutos)")
+    print(f"📋 Dados: {json.dumps(data, indent=2)}")
+    print("⏳ Processando (login + API)...")
     
     try:
         response = requests.post(
             "http://localhost:8001/api/processar-ecomhub/", 
             json=data,
-            timeout=300  # 5 minutos timeout
+            timeout=300
         )
         
         print(f"📊 Status: {response.status_code}")
         
         if response.status_code == 200:
             result = response.json()
-            print("✅ Automação executada com sucesso!")
-            print(f"📈 Status: {result.get('status')}")
-            print(f"📝 Mensagem: {result.get('message')}")
+            print("✅ SUCESSO!")
+            print(f"Status: {result['status']}")
+            print(f"Mensagem: {result['message']}")
             
             dados = result.get('dados_processados', [])
             stats = result.get('estatisticas', {})
             
             print(f"\n📊 Estatísticas:")
-            print(f"   - Total registros: {stats.get('total_registros', 0)}")
-            print(f"   - Total produtos: {stats.get('total_produtos', 0)}")
+            print(f"   Total: {stats.get('total_registros', 0)} pedidos")
+            print(f"   Produtos: {stats.get('total_produtos', 0)}")
             
-            if dados and len(dados) > 0:
-                print(f"\n📋 Primeiros 3 resultados:")
+            if dados:
+                print(f"\n📋 Primeiros 3 produtos:")
                 for i, item in enumerate(dados[:3]):
-                    print(f"   {i+1}. {item}")
+                    produto = item.get('Produto', 'N/A')[:30]
+                    efetividade = item.get('Efetividade', 'N/A')
+                    print(f"   {i+1}. {produto} - {efetividade}")
             
             return True
         else:
-            print(f"❌ Erro na automação: {response.status_code}")
+            print(f"❌ Erro {response.status_code}")
             try:
-                error_data = response.json()
-                print(f"📋 Detalhes: {error_data}")
+                error = response.json()
+                print(f"Detalhes: {error}")
             except:
-                print(f"📋 Resposta: {response.text}")
+                print(f"Resposta: {response.text}")
             return False
             
     except requests.exceptions.Timeout:
-        print("⏰ Timeout! A automação demorou mais de 5 minutos")
+        print("⏰ Timeout! Demorou mais de 5 minutos")
         return False
     except Exception as e:
-        print(f"❌ Erro na requisição: {e}")
+        print(f"❌ Erro: {e}")
         return False
 
 def main():
-    print("🚀 TESTE AUTOMAÇÃO ECOMHUB SELENIUM")
+    print("🤖 TESTE AUTOMAÇÃO ECOMHUB - API HÍBRIDA")
     print("=" * 50)
     
-    # Teste 1: Conexão com servidor
     if not test_server_connection():
-        print("\n💡 SOLUÇÃO:")
-        print("1. Abra outro terminal")
-        print("2. Execute: set ENVIRONMENT=local (Windows)")
-        print("3. Execute: python main.py")
-        print("4. Deixe o servidor rodando e execute este teste novamente")
         return
     
-    # Teste 2: Automação Selenium
-    print("\n" + "=" * 50)
-    success = test_selenium_automation()
+    print("=" * 50)
+    success = test_api_automation()
     
     print("\n" + "=" * 50)
     if success:
-        print("🎉 TESTE CONCLUÍDO COM SUCESSO!")
-        print("✅ A automação está funcionando corretamente")
+        print("🎉 TESTE PASSOU!")
+        print("✅ API híbrida funcionando")
     else:
         print("❌ TESTE FALHOU")
-        print("🔧 Verifique os logs do servidor para mais detalhes")
 
 if __name__ == "__main__":
     main()
