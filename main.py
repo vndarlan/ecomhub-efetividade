@@ -211,111 +211,95 @@ def extract_via_api(driver, data_inicio, data_fim, pais_id):
     all_orders = []
     offset = 0
     
-    try:
-        params["offset"] = offset
-        
-        logger.info(f"📡 Chamando API offset={offset}...")
-        
-        # Usar requests session com configuração idêntica ao test local
-        session = requests.Session()
-        session.headers.update(headers)
-        session.cookies.update(cookies)
-        
-        # Fazer requisição idêntica ao test_api_direct.py
-        response = session.get(api_url, params=params, timeout=60)
-        
-        logger.info(f"🔍 Status Code: {response.status_code}")
-        logger.info(f"🔍 Response Length: {len(response.text)}")
-        logger.info(f"🔍 Content-Type: {response.headers.get('content-type', 'N/A')}")
-        
-        # DEBUG: Conteúdo da resposta
-        response_text = response.text
-        logger.info(f"🔍 Response (primeiros 200 chars): {response_text[:200]}")
-        
-        if response.status_code != 200:
-            logger.error(f"❌ API erro {response.status_code}: {response_text[:500]}")
-            return []
-        
-        # Verificar se resposta está vazia
-        if not response_text.strip():
-            logger.error("❌ Resposta vazia da API")
-            
-            # Tentar requisição usando o driver diretamente
-            logger.info("🔄 Tentando via executeScript do driver...")
-            try:
-                script = f"""
-                return fetch('https://api.ecomhub.app/api/orders?{requests.compat.urlencode(params)}', {{
-                    method: 'GET',
-                    headers: {{
-                        'Accept': '*/*',
-                        'Origin': 'https://go.ecomhub.app',
-                        'Referer': 'https://go.ecomhub.app/'
-                    }}
-                }}).then(r => r.text());
-                """
-                driver_response = driver.execute_script(script)
-                logger.info(f"🔍 Driver response: {driver_response[:200] if driver_response else 'None'}")
-            except Exception as e:
-                logger.error(f"❌ Erro driver script: {e}")
-            
-            return []
-        
-        # Verificar se é HTML
-        if response_text.strip().startswith('<'):
-            logger.error(f"❌ API retornou HTML: {response_text[:300]}")
-            return []
-        
+    # Configurar session uma vez
+    session = requests.Session()
+    session.headers.update(headers)
+    session.cookies.update(cookies)
+    
+    while True:
         try:
-            orders = response.json()
-            logger.info(f"✅ JSON OK: {type(orders)} com {len(orders) if isinstance(orders, list) else 'N/A'} itens")
+            params["offset"] = offset
             
-        except Exception as e:
-            logger.error(f"❌ Erro JSON: {e}")
-            logger.error(f"❌ Raw text: {repr(response_text[:300])}")
-            return []
-        
-        if not orders:
-            logger.info("📡 Array vazio")
-            return []
+            logger.info(f"📡 Chamando API offset={offset}...")
             
-        logger.info(f"📡 Processando {len(orders)} pedidos...")
-        
-        # Processar pedidos com estrutura correta
-        for i, order in enumerate(orders):
+            response = session.get(api_url, params=params, timeout=60)
+            
+            logger.info(f"🔍 Status Code: {response.status_code}")
+            logger.info(f"🔍 Response Length: {len(response.text)}")
+            
+            if response.status_code != 200:
+                logger.error(f"❌ API erro {response.status_code}")
+                break
+            
+            response_text = response.text
+            if not response_text.strip():
+                logger.error("❌ Resposta vazia")
+                break
+            
+            if response_text.strip().startswith('<'):
+                logger.error("❌ API retornou HTML")
+                break
+            
             try:
-                # Produto correto: ordersItems[0].productsVariants.products.name
-                produto = "Produto Desconhecido"
-                
-                orders_items = order.get("ordersItems", [])
-                if orders_items and len(orders_items) > 0:
-                    first_item = orders_items[0]
-                    variants = first_item.get("productsVariants", {})
-                    products = variants.get("products", {})
-                    produto = products.get("name", produto)
-                
-                # Debug primeiro produto
-                if i == 0:
-                    logger.info(f"🔍 Primeiro produto extraído: '{produto}'")
-                
-                order_data = {
-                    'numero_pedido': order.get('shopifyOrderNumber', ''),
-                    'produto': produto,
-                    'data': order.get('createdAt', ''),
-                    'pais': order.get('shippingCountry', ''),
-                    'preco': order.get('price', ''),
-                    'status': order.get('status', ''),
-                    'loja': order.get('stores', {}).get('name', '')
-                }
-                
-                all_orders.append(order_data)
+                orders = response.json()
+                logger.info(f"✅ Página offset={offset}: {len(orders)} pedidos")
                 
             except Exception as e:
-                logger.warning(f"Erro ao processar pedido {i}: {e}")
-                continue
+                logger.error(f"❌ Erro JSON: {e}")
+                break
+            
+            # Se não há pedidos, parar paginação
+            if not orders or len(orders) == 0:
+                logger.info(f"📡 Fim da paginação - sem mais dados")
+                break
+            
+            # Processar pedidos desta página
+            page_count = 0
+            for i, order in enumerate(orders):
+                try:
+                    produto = "Produto Desconhecido"
+                    
+                    orders_items = order.get("ordersItems", [])
+                    if orders_items and len(orders_items) > 0:
+                        first_item = orders_items[0]
+                        variants = first_item.get("productsVariants", {})
+                        products = variants.get("products", {})
+                        produto = products.get("name", produto)
+                    
+                    # Debug primeiro produto da primeira página
+                    if offset == 0 and i == 0:
+                        logger.info(f"🔍 Primeiro produto extraído: '{produto}'")
+                    
+                    order_data = {
+                        'numero_pedido': order.get('shopifyOrderNumber', ''),
+                        'produto': produto,
+                        'data': order.get('createdAt', ''),
+                        'pais': order.get('shippingCountry', ''),
+                        'preco': order.get('price', ''),
+                        'status': order.get('status', ''),
+                        'loja': order.get('stores', {}).get('name', '')
+                    }
+                    
+                    all_orders.append(order_data)
+                    page_count += 1
+                    
+                except Exception as e:
+                    logger.warning(f"Erro ao processar pedido offset={offset}, index={i}: {e}")
+                    continue
+            
+            logger.info(f"✅ Página offset={offset}: {page_count} pedidos processados")
+            
+            # Incrementar offset para próxima página
+            offset += len(orders)
+            
+            # Limite de segurança
+            if len(all_orders) > 50000:
+                logger.warning("⚠️ Limite de 50k pedidos atingido")
+                break
                 
-    except Exception as e:
-        logger.error(f"❌ Erro na chamada API: {e}")
-        return []
+        except Exception as e:
+            logger.error(f"❌ Erro na chamada API offset={offset}: {e}")
+            break
     
     logger.info(f"✅ Total extraído: {len(all_orders)} pedidos")
     return all_orders
