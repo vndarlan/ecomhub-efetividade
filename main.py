@@ -194,14 +194,13 @@ def extract_via_api(driver, data_inicio, data_fim, pais_id):
         "search": ""
     }
     
-    # Headers baseados no seu test que funcionou
+    # Headers sem Accept-Encoding para evitar problemas de compressão
     headers = {
         "Accept": "*/*",
-        "Accept-Encoding": "gzip, deflate, br",
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
         "Origin": "https://go.ecomhub.app",
         "Referer": "https://go.ecomhub.app/",
-        "User-Agent": driver.execute_script("return navigator.userAgent;"),  # User-Agent do browser
+        "User-Agent": driver.execute_script("return navigator.userAgent;"),
         "X-Requested-With": "XMLHttpRequest"
     }
     
