@@ -12,6 +12,9 @@ import time
 import os
 from collections import defaultdict
 import logging
+import requests
+import urllib.parse
+import json
 
 app = FastAPI(title="EcomHub Selenium Automation", version="1.0.0")
 
@@ -23,7 +26,7 @@ logger = logging.getLogger(__name__)
 class ProcessRequest(BaseModel):
     data_inicio: str  # YYYY-MM-DD
     data_fim: str     # YYYY-MM-DD
-    pais_id: str      # 164=Espanha, 41=Croácia
+    pais_id: str      # 164=Espanha, 41=Croácia, 66=Grécia, 82=Itália, 142=Romênia
 
 class ProcessResponse(BaseModel):
     status: str
@@ -38,7 +41,10 @@ LOGIN_PASSWORD = "Chegou123!"
 
 PAISES_MAP = {
     "164": "Espanha",
-    "41": "Croácia"
+    "41": "Croácia",
+    "66": "Grécia", 
+    "82": "Itália",
+    "142": "Romênia"
 }
 
 def create_driver(headless=True):
@@ -151,10 +157,6 @@ def login_ecomhub(driver):
             
         raise e
 
-import requests
-import urllib.parse
-import json
-
 def get_auth_cookies(driver):
     """Obter cookies de autenticação após login"""
     cookies = driver.get_cookies()
@@ -167,7 +169,7 @@ def get_auth_cookies(driver):
     return session_cookies
 
 def extract_via_api(driver, data_inicio, data_fim, pais_id):
-    """Extrai dados via API direta do EcomHub - PAGINAÇÃO CORRETA"""
+    """Extrai dados via API direta do EcomHub - COM IMAGEM DO PRODUTO"""
     logger.info("🚀 Extraindo via API direta...")
     
     # Obter cookies após login
@@ -197,7 +199,7 @@ def extract_via_api(driver, data_inicio, data_fim, pais_id):
     logger.info(f"🔍 Conditions: {json.dumps(conditions)}")
     
     all_orders = []
-    page = 0  # offset é número da página
+    page = 0
     
     session = requests.Session()
     session.headers.update(headers)
@@ -205,7 +207,7 @@ def extract_via_api(driver, data_inicio, data_fim, pais_id):
     
     while True:
         params = {
-            "offset": page,  # página atual
+            "offset": page,
             "orderBy": "null",
             "orderDirection": "null", 
             "conditions": json.dumps(conditions),
@@ -232,15 +234,37 @@ def extract_via_api(driver, data_inicio, data_fim, pais_id):
             for order in orders:
                 try:
                     produto = "Produto Desconhecido"
+                    imagem_url = None
                     
+                    # Extrair produto e imagem
                     orders_items = order.get("ordersItems", [])
                     if orders_items and len(orders_items) > 0:
                         first_item = orders_items[0]
                         variants = first_item.get("productsVariants", {})
                         products = variants.get("products", {})
                         produto = products.get("name", produto)
+                        
+                        # Obter imagem do produto
+                        featured_image = products.get("featuredImage")
+                        if featured_image:
+                            # Construir URL completa da imagem
+                            if featured_image.startswith('/'):
+                                imagem_url = f"https://api.ecomhub.app{featured_image}"
+                            else:
+                                imagem_url = featured_image
+                    
+                    # Tentar obter imagem do campo raw também
+                    if not imagem_url:
+                        try:
+                            raw_data = json.loads(order.get('raw', '{}'))
+                            line_items = raw_data.get('lineItems', [])
+                            if line_items and len(line_items) > 0:
+                                imagem_url = line_items[0].get('image')
+                        except:
+                            pass
                     
                     order_data = {
+                        'imagem_url': imagem_url,
                         'numero_pedido': order.get('shopifyOrderNumber', ''),
                         'produto': produto,
                         'data': order.get('createdAt', ''),
@@ -256,7 +280,7 @@ def extract_via_api(driver, data_inicio, data_fim, pais_id):
                     logger.warning(f"Erro pedido: {e}")
                     continue
             
-            page += 1  # próxima página
+            page += 1
             
             if len(all_orders) > 50000:
                 logger.warning("⚠️ Limite 50k atingido")
@@ -316,10 +340,10 @@ def extract_orders_data(driver):
         return []
 
 def process_effectiveness_data(orders_data):
-    """Processa dados e calcula efetividade por produto"""
+    """Processa dados e calcula efetividade por produto - COM IMAGEM"""
     logger.info("Processando efetividade por produto...")
     
-    product_counts = defaultdict(lambda: {"Total_Registros": 0, "Delivered_Count": 0})
+    product_counts = defaultdict(lambda: {"Total_Registros": 0, "Delivered_Count": 0, "imagem_url": None})
     
     # Obter status únicos
     unique_statuses = list(set([order['status'] for order in orders_data if order['status']]))
@@ -332,12 +356,17 @@ def process_effectiveness_data(orders_data):
             produto = 'Produto Desconhecido'
         
         status = order.get('status', '').strip()
+        imagem_url = order.get('imagem_url')
         
         # Inicializar produto se não existe
         if produto not in product_counts:
-            product_counts[produto] = {"Total_Registros": 0, "Delivered_Count": 0}
+            product_counts[produto] = {"Total_Registros": 0, "Delivered_Count": 0, "imagem_url": imagem_url}
             for unique_status in unique_statuses:
                 product_counts[produto][unique_status] = 0
+        
+        # Guardar primeira imagem encontrada para o produto
+        if imagem_url and not product_counts[produto]["imagem_url"]:
+            product_counts[produto]["imagem_url"] = imagem_url
         
         # Contar registros
         product_counts[produto]["Total_Registros"] += 1
@@ -345,7 +374,7 @@ def process_effectiveness_data(orders_data):
         if status in unique_statuses:
             product_counts[produto][status] += 1
         
-        # Contar delivered (assumindo que status "Entregue" ou similar = delivered)
+        # Contar delivered
         if status.lower() in ['entregue', 'delivered', 'finalizado']:
             product_counts[produto]["Delivered_Count"] += 1
     
@@ -361,6 +390,7 @@ def process_effectiveness_data(orders_data):
             efetividade = 0
         
         row = {
+            "Imagem": counts["imagem_url"],
             "Produto": produto,
             "Total": total_registros,
         }
@@ -377,7 +407,7 @@ def process_effectiveness_data(orders_data):
         result_data.sort(key=lambda x: float(x["Efetividade"].replace('%', '')), reverse=True)
         
         # Adicionar linha de totais
-        totals = {"Produto": "Total"}
+        totals = {"Imagem": None, "Produto": "Total"}
         numeric_cols = ["Total"] + unique_statuses
         for col in numeric_cols:
             totals[col] = sum(row[col] for row in result_data)
