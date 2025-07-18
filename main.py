@@ -42,28 +42,37 @@ PAISES_MAP = {
 }
 
 def create_driver(headless=True):
-    """Cria driver Chrome configurado - VERSÃO ULTRA ESTÁVEL"""
+    """Cria driver Chrome configurado - VERSÃO RAILWAY COMPATÍVEL"""
     options = Options()
     
-    # CONFIGURAÇÃO MÍNIMA E ESTÁVEL
+    # Configurações básicas
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1366,768")
+    options.add_argument("--disable-features=VizDisplayCompositor")
     
-    # Para ambiente local, não usar headless para debug
+    # Para ambiente local
     if os.getenv("ENVIRONMENT") == "local":
         headless = False
-        logger.info("🔧 Modo LOCAL - Browser visível para debug")
-    
-    if headless:
-        options.add_argument("--headless=new")
-    
-    try:
-        logger.info("🔧 Criando ChromeDriver...")
+        logger.info("🔧 Modo LOCAL - Browser visível")
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
-        logger.info("✅ ChromeDriver criado com sucesso")
+        return driver
+    
+    # Para Railway (produção) - configuração específica
+    logger.info("🔧 Modo PRODUÇÃO - Railway")
+    options.add_argument("--headless=new")
+    options.add_argument("--remote-debugging-port=9222")
+    options.add_argument("--disable-background-timer-throttling")
+    options.add_argument("--disable-backgrounding-occluded-windows")
+    options.add_argument("--disable-renderer-backgrounding")
+    options.binary_location = "/usr/bin/google-chrome"
+    
+    try:
+        # Não usar webdriver-manager em produção
+        driver = webdriver.Chrome(options=options)
+        logger.info("✅ ChromeDriver criado para Railway")
         
         # Configurar timeouts
         driver.implicitly_wait(10)
@@ -72,8 +81,8 @@ def create_driver(headless=True):
         return driver
         
     except Exception as e:
-        logger.error(f"❌ Erro ao criar driver: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro ao inicializar Chrome: {str(e)}")
+        logger.error(f"❌ Erro ao criar driver Railway: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro Chrome Railway: {str(e)}")
 
 def login_ecomhub(driver):
     """Faz login no EcomHub - VERSÃO CORRIGIDA"""
