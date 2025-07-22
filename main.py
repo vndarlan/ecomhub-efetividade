@@ -472,7 +472,7 @@ def process_effectiveness_optimized(orders_data, incluir_pais=False):
         # Colunas agrupadas
         totais = counts["Total_Registros"]
         
-        enviados = counts["delivered"] + counts["returning"]
+        finalizados = counts["delivered"] + counts["issue"] + counts["returning"] + counts["returned"] + counts["cancelled"] + counts["canceled"] + counts["cancelado"]
         
         transito = (counts["out_for_delivery"] + counts["preparing_for_shipping"] + 
                    counts["ready_to_ship"] + counts["with_courier"])
@@ -490,7 +490,7 @@ def process_effectiveness_optimized(orders_data, incluir_pais=False):
         pct_devolvidos = (devolucao / totais * 100) if totais > 0 else 0
         
         # Efetividade parcial
-        efetividade_parcial = (entregues / enviados * 100) if enviados > 0 else 0
+        efetividade_parcial = (entregues / finalizados * 100) if finalizados > 0 else 0
         
         # Efetividade total
         efetividade_total = (entregues / totais * 100) if totais > 0 else 0
@@ -505,7 +505,7 @@ def process_effectiveness_optimized(orders_data, incluir_pais=False):
             "Imagem": counts["imagem_url"],
             "Produto": counts.get("produto_nome", chave_produto),  # Nome limpo do produto
             "Totais": totais,
-            "Enviados": enviados,
+            "Finalizados": finalizados,
             "Transito": transito,
             "Problemas": problemas,
             "Devolucao": devolucao,
@@ -529,7 +529,7 @@ def process_effectiveness_optimized(orders_data, incluir_pais=False):
             totals["País"] = "Todos"
         totals.update({"Imagem": None, "Produto": "Total"})
         
-        numeric_cols = ["Totais", "Enviados", "Transito", 
+        numeric_cols = ["Totais", "Finalizados", "Transito", 
                        "Problemas", "Devolucao", "Cancelados", "Entregues"]
         
         for col in numeric_cols:
@@ -537,12 +537,12 @@ def process_effectiveness_optimized(orders_data, incluir_pais=False):
         
         # Calcular percentuais totais
         total_pedidos = totals["Totais"]
-        total_enviados = totals["Enviados"]
+        total_finalizados = totals["Finalizados"]
         total_entregues = totals["Entregues"]
         
         totals["% A Caminho"] = f"{(totals['Transito'] / total_pedidos * 100):.1f}%" if total_pedidos > 0 else "0%"
         totals["% Devolvidos"] = f"{(totals['Devolucao'] / total_pedidos * 100):.1f}%" if total_pedidos > 0 else "0%"
-        totals["Efetividade_Parcial"] = f"{(total_entregues / total_enviados * 100):.1f}%" if total_enviados > 0 else "0%"
+        totals["Efetividade_Parcial"] = f"{(total_entregues / total_finalizados * 100):.1f}%" if total_finalizados > 0 else "0%"
         totals["Efetividade_Total"] = f"{(total_entregues / total_pedidos * 100):.1f}% (Média)" if total_pedidos > 0 else "0%"
         
         result_data.append(totals)
