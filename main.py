@@ -1,4 +1,4 @@
-# main.py
+# main.py - COM SUPORTE A "TODOS OS PAÍSES"
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from selenium import webdriver
@@ -26,11 +26,11 @@ logger = logging.getLogger(__name__)
 class ProcessRequest(BaseModel):
     data_inicio: str  # YYYY-MM-DD
     data_fim: str     # YYYY-MM-DD
-    pais_id: str      # 164=Espanha, 41=Croácia, 66=Grécia, 82=Itália, 142=Romênia
+    pais_id: str      # 164=Espanha, 41=Croácia, 66=Grécia, 82=Itália, 142=Romênia, "todos"=Todos
 
 class ProcessResponse(BaseModel):
     status: str
-    dados_processados: dict  # Agora contém ambas visualizações
+    dados_processados: dict
     estatisticas: dict
     message: str
 
@@ -44,8 +44,12 @@ PAISES_MAP = {
     "41": "Croácia",
     "66": "Grécia", 
     "82": "Itália",
-    "142": "Romênia"
+    "142": "Romênia",
+    "todos": "Todos os Países"  # NOVA OPÇÃO
 }
+
+# IDs dos países para consulta "todos"
+TODOS_PAISES_IDS = ["164", "41", "66", "82", "142"]
 
 def create_driver(headless=True):
     """Cria driver Chrome configurado - VERSÃO RAILWAY COMPATÍVEL"""
@@ -76,11 +80,9 @@ def create_driver(headless=True):
     options.binary_location = "/usr/bin/google-chrome"
     
     try:
-        # Não usar webdriver-manager em produção
         driver = webdriver.Chrome(options=options)
         logger.info("✅ ChromeDriver criado para Railway")
         
-        # Configurar timeouts
         driver.implicitly_wait(10)
         driver.set_page_load_timeout(30)
         
@@ -91,20 +93,18 @@ def create_driver(headless=True):
         raise HTTPException(status_code=500, detail=f"Erro Chrome Railway: {str(e)}")
 
 def login_ecomhub(driver):
-    """Faz login no EcomHub - VERSÃO CORRIGIDA"""
+    """Faz login no EcomHub"""
     logger.info("Fazendo login no EcomHub...")
     
     driver.get(ECOMHUB_URL)
     
-    # Aguardar página carregar
     WebDriverWait(driver, 15).until(
         EC.presence_of_element_located((By.TAG_NAME, "body"))
     )
     
-    time.sleep(3)  # Aguardar JavaScript carregar
+    time.sleep(3)
     
     try:
-        # Campo de email - usar ID específico
         email_field = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.ID, "input-email"))
         )
@@ -112,7 +112,6 @@ def login_ecomhub(driver):
         email_field.send_keys(LOGIN_EMAIL)
         logger.info("✅ Email preenchido")
         
-        # Campo de senha - usar ID específico  
         password_field = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.ID, "input-password"))
         )
@@ -120,22 +119,18 @@ def login_ecomhub(driver):
         password_field.send_keys(LOGIN_PASSWORD)
         logger.info("✅ Senha preenchida")
         
-        time.sleep(1)  # Pequena pausa
+        time.sleep(1)
         
-        # Botão de login - usar seletor específico
         login_button = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.CSS_SELECTOR, "a[role='button'].btn.tone-default"))
         )
         
-        # Scroll para o botão se necessário
         driver.execute_script("arguments[0].scrollIntoView();", login_button)
         time.sleep(0.5)
         
-        # Clicar no botão
         login_button.click()
         logger.info("✅ Botão de login clicado")
         
-        # Aguardar redirecionamento (verificar se saiu da página de login)
         WebDriverWait(driver, 20).until(
             lambda d: "login" not in d.current_url.lower() or 
                      len(d.find_elements(By.ID, "input-email")) == 0
@@ -148,7 +143,6 @@ def login_ecomhub(driver):
         logger.error(f"❌ Erro no login: {e}")
         logger.error(f"🔗 URL atual: {driver.current_url}")
         
-        # Debug: capturar screenshot se possível
         try:
             driver.save_screenshot("login_error.png")
             logger.info("📸 Screenshot salvo: login_error.png")
@@ -169,11 +163,19 @@ def get_auth_cookies(driver):
     return session_cookies
 
 def extract_via_api(driver, data_inicio, data_fim, pais_id):
-    """Extrai dados via API direta do EcomHub - COM IMAGEM DO PRODUTO"""
+    """Extrai dados via API direta do EcomHub - COM SUPORTE A TODOS OS PAÍSES"""
     logger.info("🚀 Extraindo via API direta...")
     
     # Obter cookies após login
     cookies = get_auth_cookies(driver)
+    
+    # LÓGICA MODIFICADA: Se pais_id for "todos", usar todos os países
+    if pais_id == "todos":
+        logger.info("🌍 Processando TODOS OS PAÍSES")
+        paises_ids = [int(pid) for pid in TODOS_PAISES_IDS]  # [164, 41, 66, 82, 142]
+    else:
+        logger.info(f"🌍 Processando país específico: {PAISES_MAP.get(pais_id, pais_id)}")
+        paises_ids = [int(pais_id)]
     
     conditions = {
         "orders": {
@@ -181,7 +183,7 @@ def extract_via_api(driver, data_inicio, data_fim, pais_id):
                 "start": data_inicio,
                 "end": data_fim
             },
-            "shippingCountry_id": int(pais_id)
+            "shippingCountry_id": paises_ids  # ARRAY de países
         }
     }
     
@@ -247,7 +249,6 @@ def extract_via_api(driver, data_inicio, data_fim, pais_id):
                         # Obter imagem do produto
                         featured_image = products.get("featuredImage")
                         if featured_image:
-                            # Construir URL completa da imagem
                             if featured_image.startswith('/'):
                                 imagem_url = f"https://api.ecomhub.app{featured_image}"
                             else:
@@ -263,15 +264,19 @@ def extract_via_api(driver, data_inicio, data_fim, pais_id):
                         except:
                             pass
                     
+                    # CAMPO ADICIONAL: País de entrega para identificação quando "todos"
+                    pais_entrega = order.get('shippingCountry', '')
+                    
                     order_data = {
                         'imagem_url': imagem_url,
                         'numero_pedido': order.get('shopifyOrderNumber', ''),
                         'produto': produto,
                         'data': order.get('createdAt', ''),
-                        'pais': order.get('shippingCountry', ''),
+                        'pais': pais_entrega,  # País de entrega
                         'preco': order.get('price', ''),
                         'status': order.get('status', ''),
-                        'loja': order.get('stores', {}).get('name', '')
+                        'loja': order.get('stores', {}).get('name', ''),
+                        'pais_id': order.get('shippingCountry_id', '')  # ID do país para controle
                     }
                     
                     all_orders.append(order_data)
@@ -338,11 +343,6 @@ def process_effectiveness_data(orders_data):
         total_registros = counts["Total_Registros"]
         delivered = counts["Delivered_Count"]
         
-        if total_registros > 0:
-            efetividade = (delivered / total_registros) * 100
-        else:
-            efetividade = 0
-        
         row = {
             "Imagem": counts["imagem_url"],
             "Produto": produto,
@@ -353,14 +353,13 @@ def process_effectiveness_data(orders_data):
         for status in unique_statuses:
             row[status] = counts[status]
         
-        # REMOVIDA coluna Efetividade para visualização total
         result_data.append(row)
     
-    # Ordenar por total de registros (removida ordenação por efetividade)
+    # Ordenar por total de registros
     if result_data:
         result_data.sort(key=lambda x: x["Total"], reverse=True)
         
-        # Adicionar linha de totais (sem efetividade)
+        # Adicionar linha de totais
         totals = {"Imagem": None, "Produto": "Total"}
         numeric_cols = ["Total"] + unique_statuses
         for col in numeric_cols:
@@ -389,8 +388,8 @@ def process_effectiveness_optimized(orders_data):
         "delivered": 0,
         "returning": 0,
         "returned": 0,
-        "cancelled": 0,  # NOVO: cancelados
-        "canceled": 0,   # Variações de cancelamento
+        "cancelled": 0,
+        "canceled": 0,
         "cancelado": 0,
         "out_for_delivery": 0,
         "preparing_for_shipping": 0,
@@ -400,13 +399,6 @@ def process_effectiveness_optimized(orders_data):
         # Outros status dinâmicos
         "outros_status": defaultdict(int)
     })
-    
-    # Mapear todos os status únicos primeiro
-    all_statuses = set()
-    for order in orders_data:
-        status = order.get('status', '').strip().lower()
-        if status:
-            all_statuses.add(status)
     
     # Processar cada pedido
     for order in orders_data:
@@ -457,23 +449,20 @@ def process_effectiveness_optimized(orders_data):
         
         problemas = counts["issue"]
         
-        # NOVA: devolução (returning + returned + issue)
         devolucao = counts["returning"] + counts["returned"] + counts["issue"]
         
-        # Cancelados (soma de todas variações)
         cancelados = counts["cancelled"] + counts["canceled"] + counts["cancelado"]
         
         entregues = counts["delivered"]
         
         # Percentuais
         pct_transito = (transito / totais * 100) if totais > 0 else 0
-        
         pct_devolvidos = (devolucao / totais * 100) if totais > 0 else 0
         
         # Efetividade parcial
         efetividade_parcial = (entregues / enviados * 100) if enviados > 0 else 0
         
-        # Efetividade total (original)
+        # Efetividade total
         efetividade_total = (entregues / totais * 100) if totais > 0 else 0
         
         row = {
@@ -483,11 +472,11 @@ def process_effectiveness_optimized(orders_data):
             "Enviados": enviados,
             "Transito": transito,
             "Problemas": problemas,
-            "Devolucao": devolucao,  # NOVA COLUNA após Problemas
+            "Devolucao": devolucao,
             "Cancelados": cancelados,
             "Entregues": entregues,
-            "% A Caminho": f"{pct_transito:.1f}%",  # RENOMEADO
-            "% Devolvidos": f"{pct_devolvidos:.1f}%",  # RENOMEADO
+            "% A Caminho": f"{pct_transito:.1f}%",
+            "% Devolvidos": f"{pct_devolvidos:.1f}%",
             "Efetividade_Parcial": f"{efetividade_parcial:.1f}%",
             "Efetividade_Total": f"{efetividade_total:.1f}%"
         }
@@ -501,7 +490,6 @@ def process_effectiveness_optimized(orders_data):
         # Adicionar linha de totais
         totals = {"Imagem": None, "Produto": "Total"}
         
-        # Somar colunas numéricas (atualizado com nova estrutura)
         numeric_cols = ["Totais", "Enviados", "Transito", 
                        "Problemas", "Devolucao", "Cancelados", "Entregues"]
         
@@ -535,11 +523,11 @@ async def root():
 
 @app.post("/api/processar-ecomhub/", response_model=ProcessResponse)
 async def processar_ecomhub(request: ProcessRequest):
-    """Endpoint principal - agora com suporte a ambas visualizações"""
+    """Endpoint principal - COM SUPORTE A TODOS OS PAÍSES"""
     
     logger.info(f"Processamento: {request.data_inicio} - {request.data_fim}, País: {request.pais_id}")
     
-    # Validações
+    # VALIDAÇÃO MODIFICADA: Aceitar "todos" ou países específicos
     if request.pais_id not in PAISES_MAP:
         raise HTTPException(status_code=400, detail="País não suportado")
     
@@ -562,7 +550,7 @@ async def processar_ecomhub(request: ProcessRequest):
                 message="Nenhum pedido encontrado"
             )
         
-        # RETORNAR AMBAS AS VISUALIZAÇÕES
+        # Retornar ambas as visualizações
         processed_data_total, stats_total = process_effectiveness_data(orders_data)
         processed_data_otimizada, stats_otimizada = process_effectiveness_optimized(orders_data)
         
