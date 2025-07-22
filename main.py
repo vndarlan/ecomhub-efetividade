@@ -318,31 +318,37 @@ def process_effectiveness_data(orders_data, incluir_pais=False):
         imagem_url = order.get('imagem_url')
         pais = order.get('pais', '')
         
+        # CHAVE MODIFICADA: incluir país quando necessário
+        if incluir_pais:
+            chave_produto = f"{produto}|{pais}"  # Chave única por produto+país
+        else:
+            chave_produto = produto
+        
         # Inicializar produto se não existe
-        if produto not in product_counts:
-            product_counts[produto] = {"Total_Registros": 0, "Delivered_Count": 0, "imagem_url": imagem_url, "pais": pais}
+        if chave_produto not in product_counts:
+            product_counts[chave_produto] = {"Total_Registros": 0, "Delivered_Count": 0, "imagem_url": imagem_url, "pais": pais, "produto_nome": produto}
             for unique_status in unique_statuses:
-                product_counts[produto][unique_status] = 0
+                product_counts[chave_produto][unique_status] = 0
         
         # Guardar primeira imagem e país encontrados para o produto
-        if imagem_url and not product_counts[produto]["imagem_url"]:
-            product_counts[produto]["imagem_url"] = imagem_url
-        if pais and not product_counts[produto]["pais"]:
-            product_counts[produto]["pais"] = pais
+        if imagem_url and not product_counts[chave_produto]["imagem_url"]:
+            product_counts[chave_produto]["imagem_url"] = imagem_url
+        if pais and not product_counts[chave_produto]["pais"]:
+            product_counts[chave_produto]["pais"] = pais
         
         # Contar registros
-        product_counts[produto]["Total_Registros"] += 1
+        product_counts[chave_produto]["Total_Registros"] += 1
         
         if status in unique_statuses:
-            product_counts[produto][status] += 1
+            product_counts[chave_produto][status] += 1
         
         # Contar delivered
         if status.lower() in ['entregue', 'delivered', 'finalizado']:
-            product_counts[produto]["Delivered_Count"] += 1
+            product_counts[chave_produto]["Delivered_Count"] += 1
     
     # Converter para formato final
     result_data = []
-    for produto, counts in product_counts.items():
+    for chave_produto, counts in product_counts.items():
         total_registros = counts["Total_Registros"]
         delivered = counts["Delivered_Count"]
         
@@ -354,7 +360,7 @@ def process_effectiveness_data(orders_data, incluir_pais=False):
         
         row.update({
             "Imagem": counts["imagem_url"],
-            "Produto": produto,
+            "Produto": counts.get("produto_nome", chave_produto),  # Nome limpo do produto
             "Total": total_registros,
         })
         
@@ -398,6 +404,7 @@ def process_effectiveness_optimized(orders_data, incluir_pais=False):
         "Total_Registros": 0, 
         "imagem_url": None,
         "pais": None,
+        "produto_nome": None,
         # Contadores por status individual
         "delivered": 0,
         "returning": 0,
@@ -424,10 +431,16 @@ def process_effectiveness_optimized(orders_data, incluir_pais=False):
         imagem_url = order.get('imagem_url')
         pais = order.get('pais', '')
         
+        # CHAVE MODIFICADA: incluir país quando necessário
+        if incluir_pais:
+            chave_produto = f"{produto}|{pais}"  # Chave única por produto+país
+        else:
+            chave_produto = produto
+        
         # Inicializar produto se não existe
-        if produto not in product_counts:
-            product_counts[produto] = {
-                "Total_Registros": 0, "imagem_url": imagem_url, "pais": pais,
+        if chave_produto not in product_counts:
+            product_counts[chave_produto] = {
+                "Total_Registros": 0, "imagem_url": imagem_url, "pais": pais, "produto_nome": produto,
                 "delivered": 0, "returning": 0, "returned": 0,
                 "cancelled": 0, "canceled": 0, "cancelado": 0,
                 "out_for_delivery": 0, "preparing_for_shipping": 0, 
@@ -436,26 +449,26 @@ def process_effectiveness_optimized(orders_data, incluir_pais=False):
             }
         
         # Guardar primeira imagem e país
-        if imagem_url and not product_counts[produto]["imagem_url"]:
-            product_counts[produto]["imagem_url"] = imagem_url
-        if pais and not product_counts[produto]["pais"]:
-            product_counts[produto]["pais"] = pais
+        if imagem_url and not product_counts[chave_produto]["imagem_url"]:
+            product_counts[chave_produto]["imagem_url"] = imagem_url
+        if pais and not product_counts[chave_produto]["pais"]:
+            product_counts[chave_produto]["pais"] = pais
         
         # Contar registros
-        product_counts[produto]["Total_Registros"] += 1
+        product_counts[chave_produto]["Total_Registros"] += 1
         
         # Contar status específicos
         known_statuses = ['delivered', 'returning', 'returned', 'cancelled', 'canceled', 'cancelado',
                          'out_for_delivery', 'preparing_for_shipping', 'ready_to_ship', 'with_courier', 'issue']
         
         if status in known_statuses:
-            product_counts[produto][status] += 1
+            product_counts[chave_produto][status] += 1
         else:
-            product_counts[produto]["outros_status"][status] += 1
+            product_counts[chave_produto]["outros_status"][status] += 1
     
     # Converter para formato otimizado
     result_data = []
-    for produto, counts in product_counts.items():
+    for chave_produto, counts in product_counts.items():
         # Colunas agrupadas
         totais = counts["Total_Registros"]
         
@@ -490,7 +503,7 @@ def process_effectiveness_optimized(orders_data, incluir_pais=False):
         
         row.update({
             "Imagem": counts["imagem_url"],
-            "Produto": produto,
+            "Produto": counts.get("produto_nome", chave_produto),  # Nome limpo do produto
             "Totais": totais,
             "Enviados": enviados,
             "Transito": transito,
