@@ -1,4 +1,4 @@
-# main.py - COM SUPORTE A "TODOS OS PAÍSES"
+# main.py - COM SUPORTE A "TODOS OS PAÍSES" + REPÚBLICA CHECA E POLÔNIA
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from selenium import webdriver
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class ProcessRequest(BaseModel):
     data_inicio: str  # YYYY-MM-DD
     data_fim: str     # YYYY-MM-DD
-    pais_id: str      # 164=Espanha, 41=Croácia, 66=Grécia, 82=Itália, 142=Romênia, "todos"=Todos
+    pais_id: str      # 164=Espanha, 41=Croácia, 66=Grécia, 82=Itália, 142=Romênia, 44=Rep.Checa, 139=Polônia, "todos"=Todos
 
 class ProcessResponse(BaseModel):
     status: str
@@ -45,11 +45,13 @@ PAISES_MAP = {
     "66": "Grécia", 
     "82": "Itália",
     "142": "Romênia",
-    "todos": "Todos os Países"  # NOVA OPÇÃO
+    "44": "República Checa",   # NOVO
+    "139": "Polônia",          # NOVO
+    "todos": "Todos os Países"
 }
 
-# IDs dos países para consulta "todos"
-TODOS_PAISES_IDS = ["164", "41", "66", "82", "142"]
+# IDs dos países para consulta "todos" - ATUALIZADO
+TODOS_PAISES_IDS = ["164", "41", "66", "82", "142", "44", "139"]
 
 def create_driver(headless=True):
     """Cria driver Chrome configurado - VERSÃO RAILWAY COMPATÍVEL"""
@@ -163,16 +165,16 @@ def get_auth_cookies(driver):
     return session_cookies
 
 def extract_via_api(driver, data_inicio, data_fim, pais_id):
-    """Extrai dados via API direta do EcomHub - COM SUPORTE A TODOS OS PAÍSES"""
+    """Extrai dados via API direta do EcomHub - COM SUPORTE A TODOS OS PAÍSES + NOVOS PAÍSES"""
     logger.info("🚀 Extraindo via API direta...")
     
     # Obter cookies após login
     cookies = get_auth_cookies(driver)
     
-    # LÓGICA MODIFICADA: Se pais_id for "todos", usar todos os países
+    # LÓGICA MODIFICADA: Se pais_id for "todos", usar todos os países (incluindo novos)
     if pais_id == "todos":
-        logger.info("🌍 Processando TODOS OS PAÍSES")
-        paises_ids = [int(pid) for pid in TODOS_PAISES_IDS]  # [164, 41, 66, 82, 142]
+        logger.info("🌍 Processando TODOS OS PAÍSES (incluindo República Checa e Polônia)")
+        paises_ids = [int(pid) for pid in TODOS_PAISES_IDS]  # [164, 41, 66, 82, 142, 44, 139]
     else:
         logger.info(f"🌍 Processando país específico: {PAISES_MAP.get(pais_id, pais_id)}")
         paises_ids = [int(pais_id)]
@@ -562,11 +564,11 @@ async def root():
 
 @app.post("/api/processar-ecomhub/", response_model=ProcessResponse)
 async def processar_ecomhub(request: ProcessRequest):
-    """Endpoint principal - COM SUPORTE A TODOS OS PAÍSES"""
+    """Endpoint principal - COM SUPORTE A TODOS OS PAÍSES + NOVOS PAÍSES"""
     
     logger.info(f"Processamento: {request.data_inicio} - {request.data_fim}, País: {request.pais_id}")
     
-    # VALIDAÇÃO MODIFICADA: Aceitar "todos" ou países específicos
+    # VALIDAÇÃO MODIFICADA: Aceitar "todos" ou países específicos (incluindo novos)
     if request.pais_id not in PAISES_MAP:
         raise HTTPException(status_code=400, detail="País não suportado")
     
