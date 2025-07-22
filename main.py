@@ -589,8 +589,8 @@ async def processar_ecomhub(request: ProcessRequest):
                 message="Nenhum pedido encontrado"
             )
         
-        # DETECTAR SE É "TODOS" E INCLUIR COLUNA PAÍS
-        incluir_pais = (request.pais_id == "todos")
+        # SEMPRE INCLUIR COLUNA PAÍS
+        incluir_pais = True
         logger.info(f"Incluir coluna País: {incluir_pais}")
         
         # Retornar ambas as visualizações
