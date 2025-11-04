@@ -1,5 +1,6 @@
 # main.py - COM SUPORTE A "TODOS OS PAÍSES" + REPÚBLICA CHECA E POLÔNIA
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -15,6 +16,8 @@ import logging
 import requests
 import urllib.parse
 import json
+from datetime import datetime
+from typing import Dict
 
 app = FastAPI(title="EcomHub Selenium Automation", version="1.0.0")
 
@@ -46,6 +49,14 @@ class TrackingResponse(BaseModel):
     total_pedidos: int
     data_sincronizacao: str
     pais_processado: str
+
+class AuthResponse(BaseModel):
+    success: bool
+    cookies: Dict[str, str]
+    cookie_string: str
+    headers: Dict[str, str]
+    timestamp: str
+    message: str
 
 # Configurações
 ECOMHUB_URL = "https://go.ecomhub.app/login"
@@ -883,9 +894,552 @@ async def pedidos_status_tracking(request: TrackingRequest):
         if driver:
             driver.quit()
 
-@app.get("/")
+@app.post("/api/auth", response_model=AuthResponse)
+async def authenticate():
+    """
+    Endpoint para obter autenticação da EcomHub
+
+    Retorna cookies e headers necessários para fazer requisições à API da EcomHub.
+    Use este endpoint para obter tokens de autenticação automaticamente.
+    """
+    driver = None
+
+    try:
+        logger.info("🚀 Iniciando autenticação...")
+
+        # Criar driver
+        headless = os.getenv("ENVIRONMENT") != "local"
+        driver = create_driver(headless=headless)
+
+        # Fazer login
+        login_success = login_ecomhub(driver)
+
+        if not login_success:
+            raise HTTPException(
+                status_code=500,
+                detail="Falha no login da EcomHub"
+            )
+
+        # Extrair cookies
+        cookies = {}
+        for cookie in driver.get_cookies():
+            cookies[cookie['name']] = cookie['value']
+
+        # Criar cookie string
+        cookie_string = "; ".join([f"{k}={v}" for k, v in cookies.items()])
+
+        # Headers necessários
+        headers = {
+            "Accept": "*/*",
+            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Origin": "https://go.ecomhub.app",
+            "Referer": "https://go.ecomhub.app/",
+            "User-Agent": driver.execute_script("return navigator.userAgent;"),
+            "X-Requested-With": "XMLHttpRequest",
+            "Content-Type": "application/json"
+        }
+
+        logger.info(f"✅ Autenticação concluída. Cookies: {list(cookies.keys())}")
+
+        return AuthResponse(
+            success=True,
+            cookies=cookies,
+            cookie_string=cookie_string,
+            headers=headers,
+            timestamp=datetime.utcnow().isoformat() + "Z",
+            message="Autenticação bem-sucedida"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erro na autenticação: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro interno: {str(e)}"
+        )
+    finally:
+        if driver:
+            try:
+                driver.quit()
+                logger.info("🔒 Driver fechado")
+            except:
+                pass
+
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    return {"message": "EcomHub Selenium Automation Server", "status": "running"}
+    """Página inicial com documentação dos endpoints"""
+    html = """
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>EcomHub API - Documentação</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                padding: 20px;
+            }
+            .container {
+                max-width: 900px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 15px;
+                padding: 40px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            }
+            h1 {
+                color: #667eea;
+                margin-bottom: 10px;
+                font-size: 2.5em;
+            }
+            .subtitle {
+                color: #666;
+                margin-bottom: 30px;
+                font-size: 1.1em;
+            }
+            .endpoint-card {
+                background: #f8f9fa;
+                border-left: 4px solid #667eea;
+                padding: 20px;
+                margin: 20px 0;
+                border-radius: 8px;
+            }
+            .method {
+                display: inline-block;
+                padding: 5px 12px;
+                border-radius: 5px;
+                font-weight: bold;
+                margin-right: 10px;
+                color: white;
+            }
+            .post { background: #28a745; }
+            .get { background: #17a2b8; }
+            code {
+                background: #2d2d2d;
+                color: #f8f8f2;
+                padding: 2px 6px;
+                border-radius: 3px;
+                font-family: 'Courier New', monospace;
+            }
+            .link {
+                display: inline-block;
+                margin: 10px 10px 10px 0;
+                padding: 10px 20px;
+                background: #667eea;
+                color: white;
+                text-decoration: none;
+                border-radius: 5px;
+                transition: background 0.3s;
+            }
+            .link:hover {
+                background: #5568d3;
+            }
+            h2 {
+                color: #34495e;
+                margin-top: 30px;
+                margin-bottom: 15px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🔐 EcomHub API</h1>
+            <p class="subtitle">Serviço de autenticação e processamento de pedidos EcomHub</p>
+
+            <h2>📋 Endpoints Disponíveis</h2>
+
+            <div class="endpoint-card">
+                <span class="method post">POST</span>
+                <strong>/api/auth</strong>
+                <p style="margin-top: 10px;">Retorna cookies e headers de autenticação da EcomHub.</p>
+                <p style="margin-top: 5px; color: #666;">Use este endpoint para obter tokens automaticamente via n8n ou outros sistemas.</p>
+            </div>
+
+            <div class="endpoint-card">
+                <span class="method post">POST</span>
+                <strong>/api/processar-ecomhub/</strong>
+                <p style="margin-top: 10px;">Processa pedidos e calcula efetividade por período e país.</p>
+                <p style="margin-top: 5px; color: #666;">Parâmetros: data_inicio, data_fim, pais_id</p>
+            </div>
+
+            <div class="endpoint-card">
+                <span class="method post">POST</span>
+                <strong>/api/pedidos-status-tracking/</strong>
+                <p style="margin-top: 10px;">Retorna lista completa de pedidos com tracking de status.</p>
+                <p style="margin-top: 5px; color: #666;">Parâmetros: data_inicio, data_fim, pais_id</p>
+            </div>
+
+            <h2>📚 Documentação</h2>
+            <a href="/docs" class="link">📖 Swagger UI - Documentação Interativa</a>
+            <a href="/api-ecomhub-docs" class="link">🌐 Documentação API EcomHub</a>
+
+            <h2>💡 Exemplo de Uso no n8n</h2>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 15px;">
+                <p><strong>1. Obter Autenticação:</strong></p>
+                <p style="margin-left: 20px;">POST → <code>https://ecomhub-selenium-production.up.railway.app/api/auth</code></p>
+                <br>
+                <p><strong>2. Usar tokens na API EcomHub:</strong></p>
+                <p style="margin-left: 20px;">Use os cookies e headers retornados para fazer requisições à <code>https://api.ecomhub.app/api/orders</code></p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+@app.get("/api-ecomhub-docs", response_class=HTMLResponse)
+async def ecomhub_api_docs():
+    """Documentação completa da API EcomHub"""
+    html = """
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Documentação API EcomHub</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: #f5f7fa;
+                padding: 20px;
+                line-height: 1.6;
+            }
+            .container {
+                max-width: 1000px;
+                margin: 0 auto;
+                background: white;
+                padding: 40px;
+                border-radius: 10px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }
+            h1 {
+                color: #2c3e50;
+                border-bottom: 3px solid #3498db;
+                padding-bottom: 15px;
+                margin-bottom: 30px;
+            }
+            h2 {
+                color: #34495e;
+                margin-top: 40px;
+                margin-bottom: 20px;
+                padding-left: 10px;
+                border-left: 4px solid #3498db;
+            }
+            h3 {
+                color: #555;
+                margin-top: 25px;
+                margin-bottom: 15px;
+            }
+            .endpoint {
+                background: #ecf0f1;
+                padding: 20px;
+                border-radius: 8px;
+                margin: 20px 0;
+                border-left: 4px solid #27ae60;
+            }
+            .method {
+                display: inline-block;
+                background: #27ae60;
+                color: white;
+                padding: 5px 15px;
+                border-radius: 5px;
+                font-weight: bold;
+                margin-right: 10px;
+            }
+            code {
+                background: #2d2d2d;
+                color: #f8f8f2;
+                padding: 2px 6px;
+                border-radius: 3px;
+                font-family: 'Courier New', monospace;
+                font-size: 0.9em;
+            }
+            pre {
+                background: #2d2d2d;
+                color: #f8f8f2;
+                padding: 20px;
+                border-radius: 8px;
+                overflow-x: auto;
+                margin: 15px 0;
+            }
+            pre code {
+                background: none;
+                padding: 0;
+            }
+            .warning {
+                background: #fff3cd;
+                border-left: 4px solid #ffc107;
+                padding: 15px;
+                margin: 20px 0;
+                border-radius: 5px;
+            }
+            .info {
+                background: #d1ecf1;
+                border-left: 4px solid #17a2b8;
+                padding: 15px;
+                margin: 20px 0;
+                border-radius: 5px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin: 20px 0;
+            }
+            th, td {
+                padding: 12px;
+                text-align: left;
+                border-bottom: 1px solid #ddd;
+            }
+            th {
+                background: #34495e;
+                color: white;
+            }
+            tr:hover {
+                background: #f5f5f5;
+            }
+            .back-link {
+                display: inline-block;
+                margin-bottom: 20px;
+                color: #3498db;
+                text-decoration: none;
+                font-weight: bold;
+            }
+            .back-link:hover {
+                text-decoration: underline;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <a href="/" class="back-link">← Voltar</a>
+
+            <h1>📚 Documentação API EcomHub</h1>
+
+            <div class="info">
+                <strong>ℹ️ Importante:</strong> Esta documentação explica como usar a API da EcomHub
+                DEPOIS de obter os tokens de autenticação através do endpoint <code>/api/auth</code>
+                deste serviço.
+            </div>
+
+            <h2>🔗 Endpoint Principal</h2>
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <code>https://api.ecomhub.app/api/orders</code>
+            </div>
+            <p><strong>Descrição:</strong> Retorna lista de pedidos com filtros e paginação.</p>
+
+            <h2>🔐 Autenticação</h2>
+            <p>A API EcomHub usa autenticação baseada em cookies. Você precisa incluir os cookies obtidos do endpoint <code>/api/auth</code> nas suas requisições.</p>
+
+            <h3>Headers Necessários</h3>
+            <pre><code>Accept: */*
+Accept-Language: pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7
+Origin: https://go.ecomhub.app
+Referer: https://go.ecomhub.app/
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...
+X-Requested-With: XMLHttpRequest
+Content-Type: application/json
+Cookie: token=...; e_token=...; refresh_token=...</code></pre>
+
+            <h2>📋 Parâmetros da Requisição</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Parâmetro</th>
+                        <th>Tipo</th>
+                        <th>Obrigatório</th>
+                        <th>Descrição</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>offset</code></td>
+                        <td>integer</td>
+                        <td>Sim</td>
+                        <td>Número da página (0, 1, 2, ...)</td>
+                    </tr>
+                    <tr>
+                        <td><code>orderBy</code></td>
+                        <td>string</td>
+                        <td>Não</td>
+                        <td>Campo para ordenação (use "null" para padrão)</td>
+                    </tr>
+                    <tr>
+                        <td><code>orderDirection</code></td>
+                        <td>string</td>
+                        <td>Não</td>
+                        <td>Direção da ordenação (use "null" para padrão)</td>
+                    </tr>
+                    <tr>
+                        <td><code>conditions</code></td>
+                        <td>JSON string</td>
+                        <td>Sim</td>
+                        <td>Filtros de data e país (ver exemplos)</td>
+                    </tr>
+                    <tr>
+                        <td><code>search</code></td>
+                        <td>string</td>
+                        <td>Não</td>
+                        <td>Termo de busca (deixe vazio se não usar)</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Estrutura do <code>conditions</code></h3>
+            <p>O parâmetro conditions deve ser um JSON stringificado com a seguinte estrutura:</p>
+            <pre><code>{
+  "orders": {
+    "date": {
+      "start": "2025-08-01",   // Data início (YYYY-MM-DD)
+      "end": "2025-08-20"      // Data fim (YYYY-MM-DD)
+    },
+    "shippingCountry_id": [164, 41, 66]  // Array de IDs de países
+  }
+}</code></pre>
+
+            <h3>IDs de Países Suportados</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>País</th>
+                        <th>ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>🇪🇸 Espanha</td><td>164</td></tr>
+                    <tr><td>🇭🇷 Croácia</td><td>41</td></tr>
+                    <tr><td>🇬🇷 Grécia</td><td>66</td></tr>
+                    <tr><td>🇮🇹 Itália</td><td>82</td></tr>
+                    <tr><td>🇷🇴 Romênia</td><td>142</td></tr>
+                    <tr><td>🇨🇿 República Tcheca</td><td>44</td></tr>
+                    <tr><td>🇵🇱 Polônia</td><td>139</td></tr>
+                </tbody>
+            </table>
+
+            <h2>📄 Estrutura da Resposta</h2>
+            <p>A API retorna um array JSON com até <strong>48 pedidos</strong> por página.</p>
+
+            <h3>Campos Principais</h3>
+            <pre><code>[
+  {
+    "id": 12345,
+    "shopifyOrderName": "#1041",
+    "status": "delivered",
+    "date": "2025-08-01T10:00:00Z",
+    "price": "29.99",
+    "revenueReleaseDate": "2025-08-15",
+    "revenueReleaseWindow": 7,
+
+    "customerName": "João Silva",
+    "customerEmail": "joao@example.com",
+    "shippingCountry": "Portugal",
+    "shippingCountry_id": 164,
+
+    "currencies": {
+      "code": "EUR"
+    },
+
+    "ordersItems": [
+      {
+        "productsVariants": {
+          "products": {
+            "name": "Nome do Produto",
+            "featuredImage": "/path/to/image.jpg"
+          }
+        }
+      }
+    ]
+  }
+]</code></pre>
+
+            <h3>Campos Financeiros Importantes</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Campo</th>
+                        <th>Descrição</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>price</code></td>
+                        <td>Valor do pedido</td>
+                    </tr>
+                    <tr>
+                        <td><code>revenueReleaseDate</code></td>
+                        <td>Data prevista de liberação do pagamento</td>
+                    </tr>
+                    <tr>
+                        <td><code>revenueReleaseWindow</code></td>
+                        <td>Janela de liberação em dias (2, 4 ou 7 dias)</td>
+                    </tr>
+                    <tr>
+                        <td><code>currencies.code</code></td>
+                        <td>Código da moeda (RON, CZK, EUR, PLN)</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Status de Pedidos</h3>
+            <ul style="margin-left: 30px; margin-top: 10px;">
+                <li><code>delivered</code> - Entregue</li>
+                <li><code>out_for_delivery</code> - Em entrega</li>
+                <li><code>returning</code> - Em devolução</li>
+                <li><code>returned</code> - Devolvido</li>
+                <li><code>pending</code> - Pendente</li>
+                <li><code>cancelled</code> - Cancelado</li>
+            </ul>
+
+            <h2>🔄 Paginação</h2>
+            <div class="info">
+                <p><strong>Como funciona:</strong></p>
+                <ul style="margin-left: 20px; margin-top: 10px;">
+                    <li>Cada requisição retorna até 48 pedidos</li>
+                    <li>Use <code>offset=0</code> para primeira página</li>
+                    <li>Incremente o offset para próximas páginas (1, 2, 3...)</li>
+                    <li>Continue até a API retornar array vazio</li>
+                </ul>
+            </div>
+
+            <h2>💻 Exemplo Prático (n8n)</h2>
+
+            <h3>1. Obter Autenticação</h3>
+            <p>Faça um POST para <code>/api/auth</code> para obter cookies</p>
+
+            <h3>2. Buscar Pedidos de Agosto na Espanha</h3>
+            <pre><code>GET https://api.ecomhub.app/api/orders?offset=0&orderBy=null&orderDirection=null&conditions={"orders":{"date":{"start":"2025-08-01","end":"2025-08-31"},"shippingCountry_id":[164]}}&search=</code></pre>
+
+            <h3>3. Múltiplos Países</h3>
+            <pre><code>GET https://api.ecomhub.app/api/orders?offset=0&orderBy=null&orderDirection=null&conditions={"orders":{"date":{"start":"2025-08-01","end":"2025-08-31"},"shippingCountry_id":[164,82,66]}}&search=</code></pre>
+
+            <h2>⚠️ Avisos Importantes</h2>
+            <div class="warning">
+                <ul style="margin-left: 20px;">
+                    <li><strong>Tokens expiram:</strong> Os tokens de autenticação podem expirar. Se receber erro 401, obtenha novos tokens.</li>
+                    <li><strong>Rate limiting:</strong> Não faça requisições muito rápidas. Adicione delays entre chamadas.</li>
+                    <li><strong>Limite de dados:</strong> Para grandes volumes, implemente controle de paginação adequado.</li>
+                    <li><strong>Formato de data:</strong> Sempre use formato YYYY-MM-DD para datas.</li>
+                </ul>
+            </div>
+
+            <h2>📞 Suporte</h2>
+            <p>Para dúvidas sobre autenticação, consulte a <a href="/docs">documentação da API de Auth</a>.</p>
+
+            <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #ecf0f1; text-align: center; color: #7f8c8d;">
+                <p>Documentação atualizada em Novembro 2025</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
 
 def safe_driver_operation(driver_func):
     """Decorator para operações seguras com retry em caso de falha de sessão"""

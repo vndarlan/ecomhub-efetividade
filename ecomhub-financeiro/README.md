@@ -1,6 +1,6 @@
-# 🔐 EcomHub Auth Service
+# 🔐 EcomHub - Autenticação Automática
 
-Serviço de autenticação automática para API da EcomHub rodando na nuvem. Elimina a necessidade de copiar tokens manualmente do navegador, fornecendo um endpoint HTTP que retorna cookies e tokens de autenticação automaticamente.
+Serviço na nuvem para obter tokens de autenticação da EcomHub automaticamente. Perfeito para integração com n8n, Make, Zapier ou qualquer sistema que faça requisições HTTP.
 
 ## 🌐 URL do Serviço
 
@@ -8,20 +8,11 @@ Serviço de autenticação automática para API da EcomHub rodando na nuvem. Eli
 https://ecomhub-selenium-production.up.railway.app
 ```
 
-## 📋 O Que Este Serviço Faz
-
-- ✅ **Autenticação automática** - Faz login na EcomHub via Selenium
-- ✅ **Retorna tokens via API** - Use em n8n, Make, Zapier ou qualquer sistema
-- ✅ **Sempre atualizado** - Tokens frescos a cada requisição
-- ✅ **Documentação integrada** - Acesse direto no navegador
-
 ## 📚 Documentação Online
 
-Acesse direto no navegador para consultar:
-
-- **https://ecomhub-selenium-production.up.railway.app/** - Página inicial
-- **https://ecomhub-selenium-production.up.railway.app/docs** - Documentação Swagger interativa
-- **https://ecomhub-selenium-production.up.railway.app/api-ecomhub-docs** - Documentação da API EcomHub
+- **[Página Inicial](https://ecomhub-selenium-production.up.railway.app/)** - Visão geral dos endpoints
+- **[Swagger UI](https://ecomhub-selenium-production.up.railway.app/docs)** - Documentação interativa
+- **[API EcomHub](https://ecomhub-selenium-production.up.railway.app/api-ecomhub-docs)** - Como usar os tokens
 
 ## 🔌 Como Usar a API
 
@@ -111,52 +102,7 @@ Agora você tem acesso aos pedidos da EcomHub! Use nós do n8n para:
 - Criar notificações
 - Integrar com outros sistemas
 
-## 💡 Exemplo Completo Python (Para Referência)
-
-```python
-import requests
-import json
-
-# 1. Obter autenticação
-auth_response = requests.post(
-    "https://ecomhub-selenium-production.up.railway.app/api/auth"
-)
-auth_data = auth_response.json()
-
-# 2. Configurar sessão com cookies
-session = requests.Session()
-session.cookies.update(auth_data["cookies"])
-session.headers.update(auth_data["headers"])
-
-# 3. Buscar pedidos da EcomHub
-conditions = {
-    "orders": {
-        "date": {
-            "start": "2025-08-01",
-            "end": "2025-08-31"
-        },
-        "shippingCountry_id": [164]  # Espanha
-    }
-}
-
-params = {
-    "offset": 0,
-    "orderBy": "null",
-    "orderDirection": "null",
-    "conditions": json.dumps(conditions),
-    "search": ""
-}
-
-response = session.get(
-    "https://api.ecomhub.app/api/orders",
-    params=params
-)
-orders = response.json()
-
-print(f"Total de pedidos: {len(orders)}")
-```
-
-## ❓ Perguntas Frequentes
+## ❓ Dúvidas Comuns
 
 ### Quanto tempo demora para obter os tokens?
 Normalmente entre 10-30 segundos, pois o serviço precisa fazer login completo no navegador.
@@ -170,48 +116,9 @@ Sim, o serviço suporta requisições paralelas, mas cada uma fará login indepe
 ### Funciona com outros países além da Espanha?
 Sim! Consulte `/api-ecomhub-docs` para lista completa de IDs de países suportados.
 
-## 🔒 Informações Técnicas
-
-### Tecnologias
-- **FastAPI** - Framework web
-- **Selenium** - Automação de navegador
-- **Chrome Headless** - Browser em modo servidor
-- **Railway** - Hospedagem em nuvem
-
-### Segurança
-- ✅ Credenciais protegidas por variáveis de ambiente
-- ✅ Tokens não são armazenados, apenas gerados sob demanda
-- ✅ Conexão HTTPS
-
-## 📞 Suporte
-
-**Documentação Completa:**
-- API de Auth: https://ecomhub-selenium-production.up.railway.app/docs
-- API EcomHub: https://ecomhub-selenium-production.up.railway.app/api-ecomhub-docs
-
 ---
 
-## 📁 Arquivos do Projeto (Para Desenvolvedores)
+## 📞 Links Úteis
 
-Este projeto está hospedado no Railway e contém:
-
-```
-ecomhub-financeiro/
-├── main.py              # Aplicação FastAPI + Selenium
-├── requirements.txt     # Dependências Python
-├── .env.example        # Template de configuração
-├── Dockerfile          # Build Docker com Chrome
-├── railway.toml        # Configuração Railway
-└── README.md           # Esta documentação
-```
-
-### Deploy/Manutenção
-
-O serviço está configurado para:
-- **Auto-restart** em caso de falha (até 3 tentativas)
-- **Healthcheck** em `/health`
-- **Logs** disponíveis no dashboard Railway
-
----
-
-**Desenvolvido para facilitar automações com a API da EcomHub** 🚀
+- [Documentação da API de Auth](https://ecomhub-selenium-production.up.railway.app/docs)
+- [Documentação da API EcomHub](https://ecomhub-selenium-production.up.railway.app/api-ecomhub-docs)
