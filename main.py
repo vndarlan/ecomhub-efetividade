@@ -1452,5 +1452,22 @@ async def processar_ecomhub(request: ProcessRequest):
 
 if __name__ == "__main__":
     import uvicorn
+
+    # NOVO: Iniciar sincronização automática de tokens se habilitado
+    if os.getenv("TOKEN_SYNC_ENABLED", "false").lower() == "true":
+        logger.info("🔄 Iniciando serviço de sincronização de tokens...")
+        try:
+            from threading import Thread
+            from token_sync.scheduler import start_background_sync
+
+            # Iniciar em thread separada para não bloquear o servidor
+            sync_thread = Thread(target=start_background_sync, daemon=True, name="TokenSyncThread")
+            sync_thread.start()
+            logger.info("✅ Serviço de sincronização iniciado em background")
+        except Exception as e:
+            logger.error(f"❌ Erro ao iniciar sincronização de tokens: {e}")
+            logger.info("Continuando sem sincronização automática...")
+
+    # Iniciar servidor FastAPI normalmente
     port = int(os.getenv("PORT", 8001))
     uvicorn.run(app, host="0.0.0.0", port=port)

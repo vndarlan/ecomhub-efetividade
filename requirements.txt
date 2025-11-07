@@ -6,3 +6,7 @@ python-dotenv==1.0.0
 requests==2.31.0
 webdriver-manager==4.0.1
 cryptography==41.0.7
+
+# Token Sync Dependencies
+apscheduler==3.10.4
+httpx==0.25.0
