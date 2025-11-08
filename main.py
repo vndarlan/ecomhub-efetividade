@@ -1454,23 +1454,21 @@ async def processar_ecomhub(request: ProcessRequest):
 if __name__ == "__main__":
     import uvicorn
 
-    # DESABILITADO: Usando Railway Cron Job em vez de thread
-    # A sincronização de tokens agora roda via cron_sync_tokens.py
-    # configurado no railway.json para executar a cada 2 minutos
-    #
-    # if os.getenv("TOKEN_SYNC_ENABLED", "false").lower() == "true":
-    #     logger.info("🔄 Iniciando serviço de sincronização de tokens...")
-    #     try:
-    #         from threading import Thread
-    #         from token_sync.scheduler import start_background_sync
-    #
-    #         # Iniciar em thread separada para não bloquear o servidor
-    #         sync_thread = Thread(target=start_background_sync, daemon=True, name="TokenSyncThread")
-    #         sync_thread.start()
-    #         logger.info("✅ Serviço de sincronização iniciado em background")
-    #     except Exception as e:
-    #         logger.error(f"❌ Erro ao iniciar sincronização de tokens: {e}")
-    #         logger.info("Continuando sem sincronização automática...")
+    # IMPORTANTE: Railway Cron tem limitação mínima de 5 minutos
+    # Como tokens expiram em 3 minutos, precisamos usar thread em background
+    if os.getenv("TOKEN_SYNC_ENABLED", "false").lower() == "true":
+        logger.info("🔄 Iniciando serviço de sincronização de tokens...")
+        try:
+            from threading import Thread
+            from token_sync.scheduler import start_background_sync
+
+            # Iniciar em thread separada para não bloquear o servidor
+            sync_thread = Thread(target=start_background_sync, daemon=True, name="TokenSyncThread")
+            sync_thread.start()
+            logger.info("✅ Serviço de sincronização iniciado em background (a cada 2 minutos)")
+        except Exception as e:
+            logger.error(f"❌ Erro ao iniciar sincronização de tokens: {e}")
+            logger.info("Continuando sem sincronização automática...")
 
     # Iniciar servidor FastAPI normalmente
     port = int(os.getenv("PORT", 8001))
