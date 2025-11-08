@@ -200,8 +200,17 @@ class TokenScheduler:
             # Próxima execução
             next_run = self.get_next_run_time()
             if next_run:
-                time_until = (next_run - datetime.utcnow()).total_seconds() / 60
-                logger.info(f"⏰ Próxima sincronização em {time_until:.1f} minutos")
+                try:
+                    # Converter next_run para naive se tiver timezone
+                    if hasattr(next_run, 'replace') and next_run.tzinfo:
+                        next_run_naive = next_run.replace(tzinfo=None)
+                    else:
+                        next_run_naive = next_run
+
+                    time_until = (next_run_naive - datetime.utcnow()).total_seconds() / 60
+                    logger.info(f"⏰ Próxima sincronização em {time_until:.1f} minutos")
+                except Exception as e:
+                    logger.debug(f"Erro ao calcular tempo até próxima execução: {e}")
 
     def _on_job_error(self, event):
         """Callback quando job tem erro."""
