@@ -57,6 +57,8 @@ class AuthResponse(BaseModel):
     headers: Dict[str, str]
     timestamp: str
     message: str
+    expires_in: Optional[int] = None  # segundos até expirar
+    expires_at: Optional[str] = None  # timestamp de expiração
 
 # Configurações
 ECOMHUB_URL = "https://go.ecomhub.app/login"
@@ -895,77 +897,123 @@ async def pedidos_status_tracking(request: TrackingRequest):
         if driver:
             driver.quit()
 
-@app.post("/api/auth", response_model=AuthResponse)
-async def authenticate():
+@app.get("/api/auth", response_model=AuthResponse)
+async def get_auth_tokens():
     """
-    Endpoint para obter autenticação da EcomHub
+    Retorna os tokens de autenticação armazenados no banco de dados
 
-    Retorna cookies e headers necessários para fazer requisições à API da EcomHub.
-    Use este endpoint para obter tokens de autenticação automaticamente.
+    Os tokens são atualizados automaticamente a cada 2 minutos pela thread de sincronização.
+    Este endpoint apenas lê os tokens já disponíveis no banco, sem fazer novo login.
+
+    Returns:
+        AuthResponse com os tokens atuais ou erro se não houver tokens disponíveis
     """
-    driver = None
-
     try:
-        logger.info("🚀 Iniciando autenticação...")
+        logger.info("📖 Lendo tokens do banco de dados...")
 
-        # Criar driver
-        headless = os.getenv("ENVIRONMENT") != "local"
-        driver = create_driver(headless=headless)
+        # Importar e usar o banco de dados
+        from token_sync.database import get_database
+        db = get_database()
 
-        # Fazer login
-        login_success = login_ecomhub(driver)
+        # Obter tokens do banco
+        tokens_data = db.get_tokens()
 
-        if not login_success:
+        if not tokens_data:
+            logger.warning("⚠️ Nenhum token disponível no banco")
             raise HTTPException(
-                status_code=500,
-                detail="Falha no login da EcomHub"
+                status_code=503,
+                detail="Tokens não disponíveis. Aguarde a sincronização automática (executa a cada 2 minutos)"
             )
 
-        # Extrair cookies
-        cookies = {}
-        for cookie in driver.get_cookies():
-            cookies[cookie['name']] = cookie['value']
+        # Verificar se tokens ainda são válidos
+        if not tokens_data.get('is_valid', False):
+            logger.warning("⚠️ Tokens expirados no banco")
+            raise HTTPException(
+                status_code=503,
+                detail=f"Tokens expirados. Última atualização: {tokens_data.get('updated_at')}. Aguarde nova sincronização."
+            )
+
+        # Preparar cookies dict
+        cookies = tokens_data.get('cookies', {})
+        if not cookies:
+            # Se não tiver cookies completos, montar com os tokens individuais
+            cookies = {
+                'token': tokens_data.get('token', ''),
+                'e_token': tokens_data.get('e_token', ''),
+                'refresh_token': tokens_data.get('refresh_token', '')
+            }
 
         # Criar cookie string
         cookie_string = "; ".join([f"{k}={v}" for k, v in cookies.items()])
 
-        # Headers necessários
+        # Headers padrão para usar com a API
         headers = {
             "Accept": "*/*",
             "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
             "Origin": "https://go.ecomhub.app",
             "Referer": "https://go.ecomhub.app/",
-            "User-Agent": driver.execute_script("return navigator.userAgent;"),
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "X-Requested-With": "XMLHttpRequest",
             "Content-Type": "application/json"
         }
 
-        logger.info(f"✅ Autenticação concluída. Cookies: {list(cookies.keys())}")
+        logger.info(f"✅ Tokens lidos com sucesso. Expira em: {tokens_data.get('expires_in')} segundos")
 
         return AuthResponse(
             success=True,
             cookies=cookies,
             cookie_string=cookie_string,
             headers=headers,
-            timestamp=datetime.utcnow().isoformat() + "Z",
-            message="Autenticação bem-sucedida"
+            timestamp=tokens_data.get('updated_at', datetime.utcnow().isoformat()),
+            expires_in=tokens_data.get('expires_in', 0),
+            expires_at=tokens_data.get('expires_at', ''),
+            message=f"Tokens válidos. Expira em {tokens_data.get('expires_in', 0)} segundos"
         )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Erro na autenticação: {e}")
+        logger.error(f"❌ Erro ao obter tokens: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Erro interno: {str(e)}"
+            detail=f"Erro interno ao obter tokens: {str(e)}"
         )
-    finally:
-        if driver:
-            try:
-                driver.quit()
-                logger.info("🔒 Driver fechado")
-            except:
-                pass
+
+@app.get("/api/auth/status")
+async def get_auth_status():
+    """
+    Retorna o status do sistema de sincronização de tokens
+
+    Mostra informações sobre:
+    - Se há tokens disponíveis
+    - Última atualização
+    - Tempo até expirar
+    - Status da sincronização
+    """
+    try:
+        from token_sync.database import get_database
+        db = get_database()
+
+        # Obter status do banco
+        status = db.get_status()
+
+        # Adicionar informações da thread se estiver rodando
+        if os.getenv("TOKEN_SYNC_ENABLED", "false").lower() == "true":
+            status['sync_enabled'] = True
+            status['sync_interval'] = "2 minutos"
+        else:
+            status['sync_enabled'] = False
+            status['message'] = "Sincronização automática desabilitada. Configure TOKEN_SYNC_ENABLED=true"
+
+        return status
+
+    except Exception as e:
+        logger.error(f"Erro ao obter status: {e}")
+        return {
+            'status': 'error',
+            'error': str(e),
+            'has_tokens': False
+        }
 
 @app.get("/")
 async def root():

@@ -49,6 +49,10 @@ Thumbs.db
 test_token_duration_result.json
 token_duration_result.json
 
+# Database
+tokens.db
+*.db
+
 # Chrome/Selenium
 chromedriver.exe
 chromedriver

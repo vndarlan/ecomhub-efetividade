@@ -20,6 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from main import create_driver, login_ecomhub, get_auth_cookies
 from .config import *
+from .database import get_database
 
 logger = logging.getLogger(__name__)
 
@@ -152,10 +153,37 @@ class TokenSyncService:
             except ImportError:
                 logger.warning("⚠️ Módulo de validação não disponível, pulando validação")
 
-        # Armazenar tokens
+        # Armazenar tokens na memória
         self.current_tokens = tokens_data
         self.last_sync = datetime.utcnow()
         self.last_sync_success = True
+
+        # Salvar no banco de dados
+        try:
+            db = get_database()
+            cookies = tokens_data.get('cookies', {})
+
+            # Extrair tokens individuais
+            token = cookies.get('token', '')
+            e_token = cookies.get('e_token', '')
+            refresh_token = cookies.get('refresh_token', '')
+
+            # Salvar no banco com tempo de expiração
+            success = db.save_tokens(
+                token=token,
+                e_token=e_token,
+                refresh_token=refresh_token,
+                cookies=cookies,
+                expires_in=TOKEN_DURATION_MINUTES * 60  # converter para segundos
+            )
+
+            if success:
+                logger.info("💾 Tokens salvos no banco de dados")
+            else:
+                logger.error("❌ Falha ao salvar tokens no banco")
+
+        except Exception as e:
+            logger.error(f"❌ Erro ao salvar tokens no banco: {e}")
 
         logger.info("💾 Tokens armazenados localmente")
         return True
