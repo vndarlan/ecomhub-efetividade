@@ -189,68 +189,6 @@ X-API-Key: sua-chave-api
 }
 ```
 
-### 5. Sincronização Manual de Tokens (n8n)
-
-Endpoint para disparar sincronização manual de tokens. **Recomendado para uso com n8n external scheduler**.
-
-**POST** `/api/sync-tokens`
-
-**Headers:**
-```http
-X-Sync-Key: sua-chave-sync-api
-```
-
-**Resposta de Sucesso (200):**
-```json
-{
-  "success": true,
-  "message": "Sincronização concluída com sucesso",
-  "sync_number": 42,
-  "timestamp": "2024-11-08T15:30:00Z",
-  "next_sync_in_minutes": 2
-}
-```
-
-#### Configuração n8n (Recomendado)
-
-**Por que usar n8n?**
-- ✅ Sem sobreposição de jobs (n8n aguarda resposta)
-- ✅ Timeout configurável (máximo 2 minutos)
-- ✅ Retry inteligente em caso de falha
-- ✅ Dashboard visual de execuções
-- ✅ Alertas fáceis de configurar
-
-**Workflow n8n:**
-```
-1. Schedule Trigger (a cada 2 minutos)
-   ↓
-2. HTTP Request
-   - Method: POST
-   - URL: https://sua-api.railway.app/api/sync-tokens
-   - Headers: {"X-Sync-Key": "{{$env.SYNC_API_KEY}}"}
-   - Timeout: 120000ms (2 minutos)
-   ↓
-3. IF (Error)
-   - Wait 10s
-   - Retry (max 2x)
-   ↓
-4. IF (3 falhas consecutivas)
-   - Send alert (Slack/Email/etc)
-```
-
-**Variáveis de Ambiente Necessárias:**
-```bash
-# No Railway (sua API)
-SYNC_API_KEY=chave-secreta-forte-aqui
-TOKEN_SYNC_ENABLED=false  # Desabilitar scheduler interno
-
-# No n8n
-SYNC_API_KEY=mesma-chave-secreta-forte-aqui
-API_URL=https://sua-api.railway.app
-```
-
-**Nota Importante:** Os tokens do EcomHub expiram a cada **3 minutos**, por isso a sincronização deve rodar a cada **2 minutos** (margem de segurança de 1 minuto).
-
 ## Códigos de Erro
 
 | Código | Descrição |
