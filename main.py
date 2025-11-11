@@ -1599,6 +1599,93 @@ async def processar_ecomhub(
         if driver:
             driver.quit()
 
+# ====================================
+# ENDPOINT DE COMPATIBILIDADE (TEMPORÁRIO)
+# ====================================
+# Mantém compatibilidade com Chegou Hub até atualização do código lá
+@app.post("/metricas/ecomhub/analises/processar_selenium/")
+@limiter.limit("5/minute") if RATE_LIMITING_ENABLED else lambda f: f
+async def processar_ecomhub_legacy(
+    request_body: ProcessRequest,
+    request: Request
+):
+    """
+    ENDPOINT DE COMPATIBILIDADE (TEMPORÁRIO) - SEM AUTENTICAÇÃO
+
+    ⚠️ Este endpoint NÃO requer autenticação para manter compatibilidade.
+    ⚠️ IMPORTANTE: Este é um risco de segurança temporário!
+
+    Este endpoint mantém compatibilidade com o código antigo do Chegou Hub.
+
+    AÇÃO NECESSÁRIA: Atualizar o código do Chegou Hub para usar o novo endpoint:
+    - URL: /api/processar-ecomhub/
+    - Header: X-API-Key: sua-chave-api
+
+    Após atualização, REMOVER ESTE ENDPOINT!
+    """
+    logger.warning("⚠️ [LEGACY ENDPOINT] /metricas/ecomhub/analises/processar_selenium/ (SEM AUTENTICAÇÃO)")
+    logger.warning("⚠️ RISCO DE SEGURANÇA: Endpoint sem autenticação ativo")
+    logger.warning("⚠️ AÇÃO NECESSÁRIA: Atualizar Chegou Hub e remover este endpoint")
+
+    # Processar diretamente sem passar pela verificação de API key
+    logger.info(f"Processamento: {request_body.data_inicio} - {request_body.data_fim}, País: {request_body.pais_id}")
+
+    # VALIDAÇÃO: Aceitar "todos" ou países específicos
+    if request_body.pais_id not in PAISES_MAP:
+        raise HTTPException(status_code=400, detail="País não suportado")
+
+    driver = None
+    try:
+        headless = os.getenv("ENVIRONMENT") != "local"
+
+        @safe_driver_operation
+        def _create_and_process():
+            nonlocal driver
+            driver = create_driver(headless=headless)
+            login_ecomhub(driver)
+            return extract_via_api(driver, request_body.data_inicio, request_body.data_fim, request_body.pais_id)
+
+        orders_data = _create_and_process()
+
+        if not orders_data:
+            return ProcessResponse(
+                status="success",
+                dados_processados={"visualizacao_total": [], "visualizacao_otimizada": []},
+                estatisticas={"total_registros": 0, "total_produtos": 0},
+                message="Nenhum pedido encontrado"
+            )
+
+        # SEMPRE INCLUIR COLUNA PAÍS
+        incluir_pais = True
+
+        # Retornar ambas as visualizações
+        processed_data_total, stats_total = process_effectiveness_data(orders_data, incluir_pais)
+        processed_data_otimizada, stats_otimizada = process_effectiveness_optimized(orders_data, incluir_pais)
+
+        response_data = {
+            "visualizacao_total": processed_data_total,
+            "visualizacao_otimizada": processed_data_otimizada,
+            "stats_total": stats_total,
+            "stats_otimizada": stats_otimizada
+        }
+
+        logger.info(f"Processamento concluído: {stats_total['total_registros']} registros")
+
+        return ProcessResponse(
+            status="success",
+            dados_processados=response_data,
+            estatisticas=stats_total,
+            message=f"Processados {stats_total['total_registros']} pedidos de {PAISES_MAP[request_body.pais_id]}"
+        )
+
+    except Exception as e:
+        logger.error(f"Erro no processamento: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro na automação: {str(e)}")
+
+    finally:
+        if driver:
+            driver.quit()
+
 if __name__ == "__main__":
     import uvicorn
 
