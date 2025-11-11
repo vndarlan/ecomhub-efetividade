@@ -41,6 +41,17 @@ if RATE_LIMITING_ENABLED:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# Função auxiliar para aplicar rate limiting condicionalmente
+def apply_rate_limit(limit_string):
+    """Retorna decorator de rate limit se habilitado, caso contrário retorna decorator vazio"""
+    if RATE_LIMITING_ENABLED and limiter:
+        return limiter.limit(limit_string)
+    else:
+        # Decorator vazio que não faz nada
+        def decorator(func):
+            return func
+        return decorator
+
 # Configuração de logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -930,7 +941,7 @@ def process_effectiveness_optimized(orders_data, incluir_pais=False):
     return result_data, stats
 
 @app.post("/api/pedidos-status-tracking/", response_model=TrackingResponse)
-@limiter.limit("10/minute") if RATE_LIMITING_ENABLED else lambda f: f
+@apply_rate_limit("10/minute")
 async def pedidos_status_tracking(
     request_body: TrackingRequest,
     request: Request,
@@ -976,7 +987,7 @@ async def pedidos_status_tracking(
             driver.quit()
 
 @app.get("/api/auth", response_model=AuthResponse)
-@limiter.limit("30/minute") if RATE_LIMITING_ENABLED else lambda f: f
+@apply_rate_limit("30/minute")
 async def get_auth_tokens(request: Request, api_key: str = Depends(verify_api_key)):
     """
     Retorna os tokens de autenticação armazenados no banco de dados
@@ -1066,7 +1077,7 @@ async def get_auth_tokens(request: Request, api_key: str = Depends(verify_api_ke
         )
 
 @app.get("/api/auth/status")
-@limiter.limit("30/minute") if RATE_LIMITING_ENABLED else lambda f: f
+@apply_rate_limit("30/minute")
 async def get_auth_status(request: Request, api_key: str = Depends(verify_api_key)):
     """
     Retorna o status do sistema de sincronização de tokens
@@ -1527,7 +1538,7 @@ def safe_driver_operation(driver_func):
     return wrapper
 
 @app.post("/api/processar-ecomhub/", response_model=ProcessResponse)
-@limiter.limit("5/minute") if RATE_LIMITING_ENABLED else lambda f: f
+@apply_rate_limit("5/minute")
 async def processar_ecomhub(
     request_body: ProcessRequest,
     request: Request,
@@ -1604,7 +1615,7 @@ async def processar_ecomhub(
 # ====================================
 # Mantém compatibilidade com Chegou Hub até atualização do código lá
 @app.post("/metricas/ecomhub/analises/processar_selenium/")
-@limiter.limit("5/minute") if RATE_LIMITING_ENABLED else lambda f: f
+@apply_rate_limit("5/minute")
 async def processar_ecomhub_legacy(
     request_body: ProcessRequest,
     request: Request
@@ -1691,7 +1702,7 @@ async def processar_ecomhub_legacy(
 # ====================================
 # Backend do Chegou Hub usa este path com /api/ no início
 @app.post("/api/metricas/ecomhub/analises/processar_selenium/")
-@limiter.limit("5/minute") if RATE_LIMITING_ENABLED else lambda f: f
+@apply_rate_limit("5/minute")
 async def processar_ecomhub_legacy_api(
     request_body: ProcessRequest,
     request: Request
