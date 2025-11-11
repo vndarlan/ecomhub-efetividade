@@ -13,7 +13,10 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(git rm:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(set:*)",
+      "Bash(set ECOMHUB_PASSWORD=Chegou123!)",
+      "Bash(nul)"
     ],
     "deny": [],
     "ask": []

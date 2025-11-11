@@ -24,6 +24,57 @@ from .database import get_database
 
 logger = logging.getLogger(__name__)
 
+def kill_orphan_chrome_processes():
+    """
+    Mata processos Chrome e ChromeDriver órfãos antes de iniciar novo driver.
+
+    Returns:
+        tuple: (processes_killed, success)
+    """
+    try:
+        import subprocess
+        import platform
+
+        killed_count = 0
+
+        if platform.system() == "Windows":
+            # Windows
+            commands = [
+                ['taskkill', '/F', '/IM', 'chrome.exe', '/T'],
+                ['taskkill', '/F', '/IM', 'chromedriver.exe', '/T']
+            ]
+        else:
+            # Linux/Unix
+            commands = [
+                ['pkill', '-9', 'chrome'],
+                ['pkill', '-9', 'chromedriver']
+            ]
+
+        for cmd in commands:
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    timeout=5,
+                    text=True
+                )
+                if result.returncode == 0:
+                    killed_count += 1
+                    logger.info(f"🧹 Processos {cmd[-1]} mortos")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"⏱️ Timeout ao executar {' '.join(cmd)}")
+            except FileNotFoundError:
+                # Comando não existe neste sistema
+                pass
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao matar processos {cmd[-1]}: {e}")
+
+        return killed_count, True
+
+    except Exception as e:
+        logger.error(f"❌ Erro na limpeza de processos: {e}")
+        return 0, False
+
 class TokenSyncService:
     """
     Serviço responsável pela sincronização de tokens.
@@ -63,7 +114,14 @@ class TokenSyncService:
             logger.info("🔄 Obtendo tokens frescos via Selenium...")
             start_time = time.time()
 
-            # Criar driver Chrome
+            # PASSO 1: Matar processos órfãos ANTES de criar novo driver
+            logger.info("🧹 Verificando processos Chrome órfãos...")
+            killed_count, cleanup_success = kill_orphan_chrome_processes()
+            if killed_count > 0:
+                logger.info(f"🧹 {killed_count} tipos de processos órfãos mortos")
+                time.sleep(2)  # Aguardar processos terminarem completamente
+
+            # PASSO 2: Criar driver Chrome
             driver = create_driver(headless=SELENIUM_HEADLESS)
             logger.debug(f"Driver criado (headless={SELENIUM_HEADLESS})")
 
@@ -120,20 +178,34 @@ class TokenSyncService:
             return None
 
         finally:
-            # Sempre fechar o driver
+            # SEMPRE fechar o driver COM RETRY
             if driver:
-                try:
-                    driver.quit()
-                    logger.debug("Driver fechado")
-                except Exception as e:
-                    logger.warning(f"Erro ao fechar driver: {e}")
-                    # Forçar encerramento de processos Chrome órfãos
+                # Tentar fechar normalmente (até 3 vezes)
+                closed = False
+                for attempt in range(3):
                     try:
-                        import subprocess
-                        subprocess.run(['pkill', '-9', 'chrome'], stderr=subprocess.DEVNULL, timeout=5)
-                        subprocess.run(['pkill', '-9', 'chromedriver'], stderr=subprocess.DEVNULL, timeout=5)
-                    except:
-                        pass
+                        driver.quit()
+                        logger.info("✅ Driver fechado com sucesso")
+                        closed = True
+                        break
+                    except Exception as e:
+                        if attempt < 2:
+                            logger.warning(f"⚠️ Tentativa {attempt + 1} de fechar driver falhou: {e}")
+                            time.sleep(1)
+                        else:
+                            logger.error(f"❌ Falha ao fechar driver após 3 tentativas: {e}")
+
+                # Se falhou ao fechar normalmente, forçar kill
+                if not closed:
+                    logger.warning("🔨 Forçando encerramento de processos...")
+                    killed_count, success = kill_orphan_chrome_processes()
+                    if killed_count > 0:
+                        logger.info(f"✅ {killed_count} tipos de processos forçados a encerrar")
+                    else:
+                        logger.error("❌ Não foi possível forçar encerramento de processos")
+
+                # Aguardar processos encerrarem completamente
+                time.sleep(1)
 
     def validate_and_store_tokens(self, tokens_data):
         """
@@ -238,14 +310,19 @@ class TokenSyncService:
         3. Armazena localmente
         4. Envia para Chegou Hub
 
+        IMPORTANTE: Este método tem timeout de 100 segundos via wrapper.
+
         Returns:
             bool: True se sincronização bem-sucedida, False caso contrário
         """
         try:
             self.sync_count += 1
+            sync_start_time = time.time()
+
             logger.info("=" * 60)
             logger.info(f"🔄 SINCRONIZAÇÃO #{self.sync_count} INICIADA")
             logger.info(f"Hora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"⏱️ Timeout máximo: 100 segundos")
 
             if self.last_sync:
                 time_since_last = (datetime.utcnow() - self.last_sync).total_seconds() / 60
@@ -268,11 +345,20 @@ class TokenSyncService:
             self.consecutive_errors = 0
             self.last_sync_success = True
 
+            # Calcular tempo de execução
+            sync_duration = time.time() - sync_start_time
+
             # Log de sucesso
             logger.info("✅ SINCRONIZAÇÃO COMPLETA COM SUCESSO")
+            logger.info(f"   Tempo de execução: {sync_duration:.1f}s")
             logger.info(f"   Total de syncs: {self.sync_count}")
             logger.info(f"   Sucessos: {self.success_count}")
             logger.info(f"   Taxa de sucesso: {(self.success_count/self.sync_count)*100:.1f}%")
+
+            # Alerta se está demorando muito
+            if sync_duration > 90:
+                logger.warning(f"⚠️ Sync demorou {sync_duration:.1f}s (>90s) - risco de sobreposição!")
+
             logger.info("=" * 60)
             return True
 
@@ -294,6 +380,41 @@ class TokenSyncService:
             logger.info("=" * 60)
             return False
 
+    def perform_sync_with_timeout(self, timeout_seconds=100):
+        """
+        Executa perform_sync com timeout.
+
+        Args:
+            timeout_seconds (int): Timeout máximo em segundos
+
+        Returns:
+            bool: True se sucesso, False se falha ou timeout
+        """
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(self.perform_sync)
+
+            try:
+                result = future.result(timeout=timeout_seconds)
+                return result
+            except FuturesTimeoutError:
+                logger.error(f"❌ TIMEOUT: Sync ultrapassou {timeout_seconds}s")
+                logger.error("🔨 Forçando limpeza de processos...")
+
+                # Tentar limpar processos órfãos
+                kill_orphan_chrome_processes()
+
+                # Marcar como erro
+                self.error_count += 1
+                self.consecutive_errors += 1
+                self.last_sync_success = False
+
+                return False
+            except Exception as e:
+                logger.error(f"❌ Erro no wrapper de timeout: {e}")
+                return False
+
     def perform_sync_with_retry(self):
         """
         Realiza sincronização com sistema de retry e circuit breaker.
@@ -302,16 +423,25 @@ class TokenSyncService:
             bool: True se eventualmente bem-sucedida, False se todas tentativas falharam
         """
         # Circuit breaker: se muitos erros consecutivos, aguardar mais tempo
-        if self.consecutive_errors > 50:
-            wait_minutes = min(self.consecutive_errors // 10, 30)  # máximo 30 min
+        if self.consecutive_errors >= 3:
+            # Aumentar tempo de espera progressivamente
+            if self.consecutive_errors < 5:
+                wait_minutes = 4  # 2 ciclos de 2min
+            elif self.consecutive_errors < 10:
+                wait_minutes = 8  # 4 ciclos
+            else:
+                wait_minutes = 16  # 8 ciclos (máximo)
+
             logger.warning(f"⏸️ CIRCUIT BREAKER: {self.consecutive_errors} erros consecutivos")
             logger.warning(f"⏸️ Aguardando {wait_minutes} minutos antes de tentar novamente...")
+            logger.warning(f"   (Isso representa {wait_minutes // 2} ciclos de sincronização)")
             time.sleep(wait_minutes * 60)
 
         for attempt in range(1, MAX_RETRY_ATTEMPTS + 1):
             logger.info(f"🔄 Tentativa {attempt} de {MAX_RETRY_ATTEMPTS}")
 
-            if self.perform_sync():
+            # Usar versão com timeout (100s)
+            if self.perform_sync_with_timeout(timeout_seconds=100):
                 return True
 
             if attempt < MAX_RETRY_ATTEMPTS:

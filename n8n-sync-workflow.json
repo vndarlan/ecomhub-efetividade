@@ -1,0 +1,271 @@
+{
+  "name": "EcomHub Token Sync (2min)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "A cada 2 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_URL}}/api/sync-tokens",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Sync-Key",
+              "value": "={{$env.SYNC_API_KEY}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000,
+          "retry": {
+            "retry": {
+              "maxRetries": 2,
+              "retryInterval": 10000
+            }
+          }
+        }
+      },
+      "id": "http-sync-request",
+      "name": "POST Sync Tokens",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "success-condition",
+              "leftValue": "={{$json.success}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-success",
+      "name": "Verificar Sucesso",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log de sucesso\nconst response = $input.item.json;\n\nconsole.log('✅ Sync completada com sucesso!');\nconsole.log('   Sync #' + response.sync_number);\nconsole.log('   Timestamp:', response.timestamp);\nconsole.log('   Próxima sync em:', response.next_sync_in_minutes, 'minutos');\n\nreturn {\n  json: {\n    status: 'success',\n    sync_number: response.sync_number,\n    timestamp: response.timestamp,\n    message: 'Sincronização bem-sucedida'\n  }\n};"
+      },
+      "id": "log-success",
+      "name": "Log Sucesso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log de erro\nconst error = $input.item.json.error || $input.item.json;\n\nconsole.error('❌ Erro na sincronização!');\nconsole.error('   Detalhes:', JSON.stringify(error, null, 2));\n\n// Incrementar contador de erros consecutivos\nconst workflow = $execution.customData || {};\nconst consecutiveErrors = (workflow.consecutiveErrors || 0) + 1;\n\n$execution.customData = {\n  ...workflow,\n  consecutiveErrors: consecutiveErrors,\n  lastError: new Date().toISOString(),\n  lastErrorMessage: error.message || error.detail || 'Erro desconhecido'\n};\n\nreturn {\n  json: {\n    status: 'error',\n    consecutive_errors: consecutiveErrors,\n    error_message: error.message || error.detail || 'Erro desconhecido',\n    timestamp: new Date().toISOString(),\n    should_alert: consecutiveErrors >= 3\n  }\n};"
+      },
+      "id": "log-error",
+      "name": "Log Erro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "alert-condition",
+              "leftValue": "={{$json.consecutive_errors}}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-should-alert",
+      "name": "3+ Erros?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alerta de múltiplas falhas\nconst data = $input.item.json;\n\nconst alertMessage = `🚨 ALERTA: ${data.consecutive_errors} falhas consecutivas na sincronização de tokens EcomHub!\n\n⚠️ Detalhes:\n- Último erro: ${data.error_message}\n- Timestamp: ${data.timestamp}\n- Servidor: ${$env.API_URL}\n\n💡 Ação necessária:\n1. Verificar logs do Railway\n2. Verificar se o serviço está online\n3. Verificar memória/CPU do container\n\n🔗 Dashboard: https://railway.app\n📊 Logs: ${$env.API_URL}/api/auth/status`;\n\nconsole.error(alertMessage);\n\n// OPCIONAL: Integrar com Slack, Discord, Email, etc\n// Descomente e configure conforme necessário:\n\nreturn {\n  json: {\n    alert_type: 'critical',\n    consecutive_errors: data.consecutive_errors,\n    message: alertMessage,\n    timestamp: data.timestamp,\n    // Para integração com Slack:\n    // slack_text: alertMessage,\n    // Para integração com Discord:\n    // discord_content: alertMessage,\n    // Para integração com Email:\n    // email_subject: `🚨 ALERTA: ${data.consecutive_errors} falhas no Token Sync`,\n    // email_body: alertMessage\n  }\n};"
+      },
+      "id": "send-alert",
+      "name": "Enviar Alerta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ],
+      "notes": "OPCIONAL: Conecte aqui um nó de Slack, Discord, Email, Telegram, etc para receber alertas"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reset do contador de erros após sucesso\nconst workflow = $execution.customData || {};\n\nif (workflow.consecutiveErrors > 0) {\n  console.log(`✅ Sincronização recuperada após ${workflow.consecutiveErrors} erros`);\n}\n\n$execution.customData = {\n  ...workflow,\n  consecutiveErrors: 0,\n  lastSuccess: new Date().toISOString()\n};\n\nreturn $input.all();"
+      },
+      "id": "reset-error-counter",
+      "name": "Reset Contador Erros",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "A cada 2 minutos": {
+      "main": [
+        [
+          {
+            "node": "POST Sync Tokens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST Sync Tokens": {
+      "main": [
+        [
+          {
+            "node": "Verificar Sucesso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar Sucesso": {
+      "main": [
+        [
+          {
+            "node": "Log Sucesso",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Sucesso": {
+      "main": [
+        [
+          {
+            "node": "Reset Contador Erros",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Erro": {
+      "main": [
+        [
+          {
+            "node": "3+ Erros?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3+ Erros?": {
+      "main": [
+        [
+          {
+            "node": "Enviar Alerta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "EcomHub",
+      "id": "ecomhub-tag"
+    },
+    {
+      "name": "Sync",
+      "id": "sync-tag"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-11T00:00:00.000Z",
+  "versionId": "1"
+}

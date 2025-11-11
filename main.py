@@ -221,10 +221,10 @@ def create_driver(headless=True):
         driver = webdriver.Chrome(options=options)
         logger.info("✅ ChromeDriver criado para Railway")
 
-        # Configurações de timeout AUMENTADAS para evitar falhas
-        driver.implicitly_wait(20)
-        driver.set_page_load_timeout(90)  # Aumentado de 45 para 90
-        driver.set_script_timeout(60)     # Aumentado de 30 para 60
+        # Configurações de timeout REDUZIDAS para evitar jobs lentos
+        driver.implicitly_wait(10)        # Reduzido de 20 para 10
+        driver.set_page_load_timeout(45)  # Reduzido de 90 para 45
+        driver.set_script_timeout(30)     # Reduzido de 60 para 30
         
         # Adicionar user agent para parecer mais natural
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -1121,6 +1121,75 @@ async def get_auth_status(request: Request, api_key: str = Depends(verify_api_ke
             'has_tokens': False
         }
 
+@app.post("/api/sync-tokens")
+@apply_rate_limit("10/minute")
+async def trigger_sync(request: Request):
+    """
+    Endpoint para n8n disparar sincronização manual de tokens
+
+    Este endpoint deve ser chamado pelo n8n a cada 2 minutos.
+    Protegido por API key no header X-Sync-Key.
+
+    Headers necessários:
+        X-Sync-Key: Chave configurada em SYNC_API_KEY
+
+    Returns:
+        JSON com resultado da sincronização
+    """
+    # Verificar API key específica para sync
+    sync_api_key = request.headers.get("X-Sync-Key")
+    expected_sync_key = os.getenv("SYNC_API_KEY")
+
+    if not expected_sync_key:
+        logger.error("❌ SYNC_API_KEY não configurada no servidor")
+        raise HTTPException(
+            status_code=500,
+            detail="Servidor mal configurado - SYNC_API_KEY não definida"
+        )
+
+    if not sync_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Header X-Sync-Key não fornecido"
+        )
+
+    if sync_api_key != expected_sync_key:
+        logger.warning(f"⚠️ Tentativa de sync com key inválida de {request.client.host}")
+        raise HTTPException(
+            status_code=401,
+            detail="X-Sync-Key inválida"
+        )
+
+    logger.info(f"🔄 Sync manual disparada por {request.client.host}")
+
+    try:
+        from token_sync.sync_service import get_service_instance
+        service = get_service_instance()
+
+        # Executar sincronização com retry
+        success = service.perform_sync_with_retry()
+
+        if success:
+            return {
+                "success": True,
+                "message": "Sincronização concluída com sucesso",
+                "sync_number": service.sync_count,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "next_sync_in_minutes": 2
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Sincronização falhou após todas as tentativas"
+            )
+
+    except Exception as e:
+        logger.error(f"❌ Erro na sincronização manual: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro na sincronização: {str(e)}"
+        )
+
 @app.get("/")
 async def root():
     """Redireciona para documentação Swagger"""
@@ -1728,9 +1797,28 @@ async def processar_ecomhub_legacy_api(
 if __name__ == "__main__":
     import uvicorn
 
-    # IMPORTANTE: Railway Cron tem limitação mínima de 5 minutos
-    # Como tokens expiram em 3 minutos, precisamos usar thread em background
+    # ============================================
+    # SINCRONIZAÇÃO DE TOKENS - DUAS OPÇÕES:
+    # ============================================
+    # OPÇÃO 1 (RECOMENDADA): n8n External Scheduler
+    #   - Configure n8n para chamar POST /api/sync-tokens a cada 2 minutos
+    #   - Header: X-Sync-Key: [valor de SYNC_API_KEY]
+    #   - Mais estável, sem sobreposição, melhor monitoring
+    #   - TOKEN_SYNC_ENABLED deve ser "false" (padrão)
+    #
+    # OPÇÃO 2: Scheduler Interno (APScheduler)
+    #   - Configure TOKEN_SYNC_ENABLED=true
+    #   - Roda em thread background
+    #   - Pode ter problemas de sobreposição se jobs demorarem >2min
+    # ============================================
+
     if os.getenv("TOKEN_SYNC_ENABLED", "false").lower() == "true":
+        logger.warning("=" * 60)
+        logger.warning("⚠️ SCHEDULER INTERNO HABILITADO")
+        logger.warning("⚠️ Recomendamos usar n8n external scheduler ao invés!")
+        logger.warning("⚠️ Para desabilitar: TOKEN_SYNC_ENABLED=false")
+        logger.warning("=" * 60)
+
         logger.info("🔄 Iniciando serviço de sincronização de tokens...")
         try:
             from threading import Thread
@@ -1751,6 +1839,13 @@ if __name__ == "__main__":
         except Exception as e:
             logger.error(f"❌ Erro ao iniciar sincronização de tokens: {e}")
             logger.info("⚠️ Continuando sem sincronização automática...")
+    else:
+        logger.info("=" * 60)
+        logger.info("ℹ️ Scheduler interno DESABILITADO (modo n8n)")
+        logger.info("ℹ️ Configure n8n para chamar POST /api/sync-tokens a cada 2min")
+        logger.info("ℹ️ Variáveis necessárias:")
+        logger.info("   - SYNC_API_KEY: Chave para proteger o endpoint")
+        logger.info("=" * 60)
 
     # Iniciar servidor FastAPI normalmente
     port = int(os.getenv("PORT", 8001))

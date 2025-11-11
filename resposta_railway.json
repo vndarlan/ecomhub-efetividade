@@ -1,0 +1,12 @@
+{
+  "status": "success",
+  "dados_processados": {
+    "visualizacao_total": [],
+    "visualizacao_otimizada": []
+  },
+  "estatisticas": {
+    "total_registros": 0,
+    "total_produtos": 0
+  },
+  "message": "Nenhum pedido encontrado"
+}
