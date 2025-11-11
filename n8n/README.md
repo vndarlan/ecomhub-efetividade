@@ -182,38 +182,6 @@ O workflow já possui lógica para detectar **3 ou mais falhas consecutivas**. P
 
 ---
 
-## 🔧 Troubleshooting
-
-### Problema: Erros consecutivos
-
-**Possíveis causas:**
-1. API Railway está offline
-2. Memória/CPU insuficiente no Railway
-3. Chrome Driver crashou
-4. Credenciais do EcomHub mudaram
-
-**Solução:**
-1. Verificar logs do Railway
-2. Verificar `/api/auth/status`
-3. Reiniciar o serviço no Railway
-4. Verificar variáveis de ambiente
-
-### Problema: Workflow não está executando
-
-**Solução:**
-1. Verificar se o workflow está **Active**
-2. Verificar variáveis de ambiente no n8n
-3. Verificar logs do n8n (Settings → Logs)
-
-### Problema: Tokens não estão sendo atualizados
-
-**Solução:**
-1. Verificar se `TOKEN_SYNC_ENABLED=false` no Railway
-2. Testar manualmente: `curl -X POST -H "X-Sync-Key: sua-chave" https://sua-api/api/sync-tokens`
-3. Verificar banco de dados SQLite no Railway
-
----
-
 ## 📝 Logs e Monitoramento
 
 ### Ver Execuções no n8n

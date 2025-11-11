@@ -19,9 +19,7 @@ Este módulo contém a lógica para:
 
 ## 🔄 Como Funciona
 
-O módulo é invocado de duas formas:
-
-### 1. Via n8n (Recomendado) ✅
+O módulo é invocado da seguinte forma:
 
 O n8n chama o endpoint `/api/sync-tokens` a cada 2 minutos:
 
@@ -30,25 +28,6 @@ n8n (Schedule) → POST /api/sync-tokens → sync_service.py → database.py
 ```
 
 **Configuração**: Ver [n8n/README.md](../n8n/README.md)
-
-### 2. Via Scheduler Interno (Não Recomendado) ⚠️
-
-Thread em background executa automaticamente:
-
-```
-scheduler.py → sync_service.py → database.py
-```
-
-**Configuração**:
-```env
-TOKEN_SYNC_ENABLED=true  # Habilita scheduler interno
-```
-
-> **Por que não recomendado?**
-> - Menos controle sobre falhas
-> - Sem dashboard visual
-> - Pode sobrepor execuções
-> - Dificulta debugging
 
 ---
 
