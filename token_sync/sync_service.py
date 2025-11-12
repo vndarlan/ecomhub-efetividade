@@ -219,19 +219,25 @@ class TokenSyncService:
             logger.info("🚀 Tentando refresh via HTTP (rápido)...")
             start_time = time.time()
 
-            # Preparar headers (SEM Cookie - será passado separadamente)
+            # Preparar headers EXATAMENTE como o browser envia
+            # Baseado na análise do Network tab do F12
+            current_headers = self.current_tokens.get('headers', {})
+
             headers = {
                 "Accept": "*/*",
                 "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Content-Type": "application/json",
                 "Origin": "https://go.ecomhub.app",
                 "Referer": "https://go.ecomhub.app/",
-                "Content-Type": "application/json"
+                "User-Agent": current_headers.get('User-Agent', 'Mozilla/5.0'),
+                "X-Requested-With": "XMLHttpRequest",
+                "sec-ch-ua": '"Chromium";v="142", "Not A(Brand";v="99"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Linux"',
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-site"
             }
-
-            # Obter User-Agent dos tokens atuais se disponível
-            current_headers = self.current_tokens.get('headers', {})
-            if 'User-Agent' in current_headers:
-                headers['User-Agent'] = current_headers['User-Agent']
 
             # Preparar cookies no formato correto do requests
             cookies_dict = self.current_tokens.get('cookies', {})
@@ -241,29 +247,37 @@ class TokenSyncService:
             logger.debug(f"🔑 e_token presente: {'e_token' in cookies_dict}")
             logger.debug(f"🔑 refresh_token presente: {'refresh_token' in cookies_dict}")
 
-            # Fazer requisição simples à API EcomHub
-            # Pode ser QUALQUER endpoint - o servidor automaticamente renova via Set-Cookie
-            payload = {
-                "pagination": {"page": 1, "perPage": 1},
-                "orderBy": "DESC",
-                "sortBy": "createdAt",
-                "filters": {
+            # Fazer requisição GET à API EcomHub (não POST!)
+            # Usar o mesmo formato que main.py usa
+            conditions = {
+                "orders": {
                     "date": {
                         "start": (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d'),
                         "end": datetime.utcnow().strftime('%Y-%m-%d')
                     },
-                    "countries": [VALIDATION_TEST_COUNTRY_ID]
+                    "shippingCountry_id": VALIDATION_TEST_COUNTRY_ID
                 }
             }
 
-            logger.debug(f"🌐 URL: {ECOMHUB_API_URL}")
-            logger.debug(f"📦 Payload: {payload}")
+            params = {
+                "offset": 0,
+                "orderBy": "null",
+                "orderDirection": "null",
+                "conditions": json.dumps(conditions),
+                "search": ""
+            }
 
-            response = requests.post(
+            logger.debug(f"🌐 URL: {ECOMHUB_API_URL}")
+            logger.debug(f"📦 Params: {params}")
+
+            # Usar Session para manter estado como o browser faz
+            session = requests.Session()
+            session.headers.update(headers)
+            session.cookies.update(cookies_dict)
+
+            response = session.get(
                 ECOMHUB_API_URL,
-                json=payload,
-                headers=headers,
-                cookies=cookies_dict,  # Passar cookies separadamente, não no header
+                params=params,
                 timeout=10  # Timeout curto - se demorar muito, melhor usar Selenium
             )
 
