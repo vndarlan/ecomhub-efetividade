@@ -219,9 +219,22 @@ class TokenSyncService:
             logger.info("🚀 Tentando refresh via HTTP (rápido)...")
             start_time = time.time()
 
-            # Preparar headers e cookies para requisição
-            headers = self.current_tokens.get('headers', {}).copy()
-            cookie_string = self.current_tokens.get('cookie_string', '')
+            # Preparar headers (SEM Cookie - será passado separadamente)
+            headers = {
+                "Accept": "*/*",
+                "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Origin": "https://go.ecomhub.app",
+                "Referer": "https://go.ecomhub.app/",
+                "Content-Type": "application/json"
+            }
+
+            # Obter User-Agent dos tokens atuais se disponível
+            current_headers = self.current_tokens.get('headers', {})
+            if 'User-Agent' in current_headers:
+                headers['User-Agent'] = current_headers['User-Agent']
+
+            # Preparar cookies no formato correto do requests
+            cookies_dict = self.current_tokens.get('cookies', {})
 
             # Fazer requisição simples à API EcomHub
             # Pode ser QUALQUER endpoint - o servidor automaticamente renova via Set-Cookie
@@ -238,20 +251,22 @@ class TokenSyncService:
                 }
             }
 
-            # Adicionar cookies aos headers
-            headers["Cookie"] = cookie_string
-
             response = requests.post(
                 ECOMHUB_API_URL,
                 json=payload,
                 headers=headers,
+                cookies=cookies_dict,  # Passar cookies separadamente, não no header
                 timeout=10  # Timeout curto - se demorar muito, melhor usar Selenium
             )
 
             # Verificar se requisição foi bem-sucedida
             if response.status_code != 200:
                 logger.warning(f"⚠️ HTTP refresh falhou com status {response.status_code}")
+                logger.debug(f"   URL: {ECOMHUB_API_URL}")
+                logger.debug(f"   Response: {response.text[:200] if response.text else 'empty'}")
                 return None
+
+            logger.debug(f"✅ HTTP refresh retornou 200 OK")
 
             # Extrair novos cookies do Set-Cookie headers
             new_cookies = {}
@@ -260,29 +275,39 @@ class TokenSyncService:
             for cookie in response.cookies:
                 new_cookies[cookie.name] = cookie.value
 
+            logger.debug(f"📦 Cookies recebidos na resposta: {list(new_cookies.keys())}")
+
             # Verificar se recebemos os tokens necessários
-            required_tokens = ['token', 'e_token', 'refresh_token']
+            required_tokens = ['token', 'e_token']  # refresh_token pode não vir sempre
             missing_tokens = [t for t in required_tokens if t not in new_cookies]
 
             if missing_tokens:
-                logger.warning(f"⚠️ Tokens ausentes na resposta HTTP: {missing_tokens}")
+                logger.warning(f"⚠️ Tokens críticos ausentes na resposta HTTP: {missing_tokens}")
+                logger.info(f"   Cookies recebidos: {list(new_cookies.keys())}")
                 # Se não recebemos novos tokens, manter os antigos (provavelmente ainda válidos)
                 # Mas vamos usar Selenium na próxima vez para garantir
                 return None
 
-            # Atualizar com refresh_token antigo se não vier um novo
-            # (às vezes o servidor só renova token e e_token, mantendo refresh_token)
-            if 'refresh_token' not in new_cookies and refresh_token:
-                new_cookies['refresh_token'] = refresh_token
+            # Mesclar com cookies antigos - preservar cookies que não foram renovados
+            # O servidor só envia os cookies que foram modificados via Set-Cookie
+            # Precisamos manter os outros (especialmente refresh_token, _ga, etc)
+            merged_cookies = cookies_dict.copy()  # Começar com cookies antigos
+            merged_cookies.update(new_cookies)    # Sobrescrever com novos
+
+            logger.debug(f"📦 Cookies finais (antigos + novos): {list(merged_cookies.keys())}")
 
             # Preparar resposta completa (mesmo formato que get_fresh_tokens)
             current_time = datetime.utcnow()
             expiration_time = current_time + timedelta(minutes=TOKEN_DURATION_MINUTES)
 
+            # Reconstruir headers para incluir User-Agent atualizado
+            final_headers = headers.copy()
+            final_headers.update(current_headers)  # Preservar outros headers úteis
+
             tokens_data = {
-                "cookies": new_cookies,
-                "cookie_string": "; ".join([f"{k}={v}" for k, v in new_cookies.items()]),
-                "headers": headers,
+                "cookies": merged_cookies,  # Usar cookies mesclados (antigos + novos)
+                "cookie_string": "; ".join([f"{k}={v}" for k, v in merged_cookies.items()]),
+                "headers": final_headers,
                 "timestamp": current_time.isoformat() + "Z",
                 "valid_until_estimate": expiration_time.isoformat() + "Z",
                 "duration_minutes": TOKEN_DURATION_MINUTES,
