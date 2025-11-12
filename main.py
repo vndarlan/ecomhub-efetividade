@@ -176,7 +176,11 @@ def create_driver(headless=True):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--remote-debugging-port=9222")
+
+    # Porta de debugging dinâmica (evita conflitos entre múltiplas instâncias)
+    import os as os_module
+    debug_port = 9000 + (os_module.getpid() % 1000)
+    options.add_argument(f"--remote-debugging-port={debug_port}")
     
     # Configurações de memória e performance
     options.add_argument("--memory-pressure-off")
@@ -213,18 +217,18 @@ def create_driver(headless=True):
     options.add_argument("--silent")
 
     # Flags de estabilidade para containers (Railway)
-    options.add_argument("--disable-dev-shm-usage")  # Crucial para evitar crashes em containers
     options.add_argument("--disable-software-rasterizer")
     options.add_argument("--disable-setuid-sandbox")
+    options.add_argument("--single-process")  # Reduz uso de memória
 
     try:
         driver = webdriver.Chrome(options=options)
         logger.info("✅ ChromeDriver criado para Railway")
 
-        # Configurações de timeout REDUZIDAS para evitar jobs lentos
+        # Configurações de timeout otimizadas
         driver.implicitly_wait(10)        # Reduzido de 20 para 10
-        driver.set_page_load_timeout(45)  # Reduzido de 90 para 45
-        driver.set_script_timeout(30)     # Reduzido de 60 para 30
+        driver.set_page_load_timeout(30)  # Reduzido de 45 para 30 (otimização adicional)
+        driver.set_script_timeout(30)     # Mantido em 30
         
         # Adicionar user agent para parecer mais natural
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -261,35 +265,31 @@ def login_ecomhub(driver):
             raise Exception("Driver perdeu conexão - sessão inválida")
         
         driver.get(ECOMHUB_URL)
-        
-        WebDriverWait(driver, 20).until(
+
+        WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
-        
-        time.sleep(3)
-        
+
         # Verificar se já está logado
         if "login" not in driver.current_url.lower():
             logger.info("✅ Já logado - redirecionando...")
             return True
         
-        email_field = WebDriverWait(driver, 15).until(
+        email_field = WebDriverWait(driver, 8).until(
             EC.element_to_be_clickable((By.ID, "input-email"))
         )
         email_field.clear()
         email_field.send_keys(LOGIN_EMAIL)
         logger.info("✅ Email preenchido")
         
-        password_field = WebDriverWait(driver, 15).until(
+        password_field = WebDriverWait(driver, 8).until(
             EC.element_to_be_clickable((By.ID, "input-password"))
         )
         password_field.clear()
         password_field.send_keys(LOGIN_PASSWORD)
         logger.info("✅ Senha preenchida")
-        
-        time.sleep(2)
-        
-        login_button = WebDriverWait(driver, 15).until(
+
+        login_button = WebDriverWait(driver, 8).until(
             EC.element_to_be_clickable((By.CSS_SELECTOR, "a[role='button'].btn.tone-default"))
         )
         
@@ -298,10 +298,10 @@ def login_ecomhub(driver):
         
         login_button.click()
         logger.info("✅ Botão de login clicado")
-        
-        # Aguardar redirecionamento com timeout maior
-        WebDriverWait(driver, 30).until(
-            lambda d: "login" not in d.current_url.lower() or 
+
+        # Aguardar redirecionamento
+        WebDriverWait(driver, 15).until(
+            lambda d: "login" not in d.current_url.lower() or
                      len(d.find_elements(By.ID, "input-email")) == 0
         )
         
@@ -1189,6 +1189,276 @@ async def trigger_sync(request: Request):
             status_code=500,
             detail=f"Erro na sincronização: {str(e)}"
         )
+
+@app.post("/api/sync/reset")
+@apply_rate_limit("10/minute")
+async def reset_sync_state(request: Request):
+    """
+    Endpoint para resetar o estado da sincronização
+
+    Reseta contador de erros consecutivos e despausa o sistema.
+    Protegido por API key no header X-Sync-Key.
+
+    Headers necessários:
+        X-Sync-Key: Chave configurada em SYNC_API_KEY
+
+    Returns:
+        JSON com resultado do reset
+    """
+    # Verificar API key
+    sync_api_key = request.headers.get("X-Sync-Key")
+    expected_sync_key = os.getenv("SYNC_API_KEY")
+
+    if not expected_sync_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Servidor mal configurado - SYNC_API_KEY não definida"
+        )
+
+    if not sync_api_key or sync_api_key != expected_sync_key:
+        logger.warning(f"⚠️ Tentativa de reset com key inválida de {request.client.host}")
+        raise HTTPException(
+            status_code=401,
+            detail="X-Sync-Key ausente ou inválida"
+        )
+
+    try:
+        from token_sync.sync_service import get_service_instance
+        service = get_service_instance()
+
+        old_consecutive = service.consecutive_errors
+        old_paused = service.paused
+
+        # Reset completo
+        service.consecutive_errors = 0
+        service.paused = False
+
+        logger.warning(f"🔄 RESET MANUAL executado por {request.client.host}")
+        logger.warning(f"   Erros consecutivos: {old_consecutive} → 0")
+        logger.warning(f"   Sistema pausado: {old_paused} → False")
+
+        return {
+            "success": True,
+            "message": "Estado da sincronização resetado com sucesso",
+            "previous_consecutive_errors": old_consecutive,
+            "previous_paused": old_paused,
+            "current_consecutive_errors": 0,
+            "current_paused": False,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Erro no reset: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao resetar: {str(e)}"
+        )
+
+@app.post("/api/sync/pause")
+@apply_rate_limit("10/minute")
+async def pause_sync(request: Request):
+    """
+    Endpoint para pausar a sincronização
+
+    Para todas as tentativas de sincronização até ser despausado.
+    Protegido por API key no header X-Sync-Key.
+
+    Headers necessários:
+        X-Sync-Key: Chave configurada em SYNC_API_KEY
+
+    Returns:
+        JSON confirmando a pausa
+    """
+    # Verificar API key
+    sync_api_key = request.headers.get("X-Sync-Key")
+    expected_sync_key = os.getenv("SYNC_API_KEY")
+
+    if not expected_sync_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Servidor mal configurado - SYNC_API_KEY não definida"
+        )
+
+    if not sync_api_key or sync_api_key != expected_sync_key:
+        logger.warning(f"⚠️ Tentativa de pause com key inválida de {request.client.host}")
+        raise HTTPException(
+            status_code=401,
+            detail="X-Sync-Key ausente ou inválida"
+        )
+
+    try:
+        from token_sync.sync_service import get_service_instance
+        service = get_service_instance()
+
+        service.paused = True
+        logger.warning(f"⏸️ Sistema PAUSADO manualmente por {request.client.host}")
+
+        return {
+            "success": True,
+            "message": "Sistema pausado com sucesso",
+            "paused": True,
+            "consecutive_errors": service.consecutive_errors,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao pausar: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao pausar: {str(e)}"
+        )
+
+@app.post("/api/sync/resume")
+@apply_rate_limit("10/minute")
+async def resume_sync(request: Request):
+    """
+    Endpoint para despausar a sincronização
+
+    Despausa o sistema e opcionalmente reseta o contador de erros.
+    Protegido por API key no header X-Sync-Key.
+
+    Headers necessários:
+        X-Sync-Key: Chave configurada em SYNC_API_KEY
+
+    Returns:
+        JSON confirmando o resume
+    """
+    # Verificar API key
+    sync_api_key = request.headers.get("X-Sync-Key")
+    expected_sync_key = os.getenv("SYNC_API_KEY")
+
+    if not expected_sync_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Servidor mal configurado - SYNC_API_KEY não definida"
+        )
+
+    if not sync_api_key or sync_api_key != expected_sync_key:
+        logger.warning(f"⚠️ Tentativa de resume com key inválida de {request.client.host}")
+        raise HTTPException(
+            status_code=401,
+            detail="X-Sync-Key ausente ou inválida"
+        )
+
+    try:
+        from token_sync.sync_service import get_service_instance
+        service = get_service_instance()
+
+        old_consecutive = service.consecutive_errors
+
+        # Despausar e resetar erros
+        service.paused = False
+        service.consecutive_errors = 0
+
+        logger.info(f"▶️ Sistema DESPAUSADO por {request.client.host}")
+        logger.info(f"   Erros consecutivos resetados: {old_consecutive} → 0")
+
+        return {
+            "success": True,
+            "message": "Sistema despausado com sucesso",
+            "paused": False,
+            "previous_consecutive_errors": old_consecutive,
+            "current_consecutive_errors": 0,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao despausar: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao despausar: {str(e)}"
+        )
+
+@app.get("/health")
+async def health_check():
+    """
+    Endpoint de health check com estado completo do sistema
+
+    Retorna informações detalhadas sobre o estado da sincronização,
+    incluindo erros consecutivos, status de pausa e circuit breaker.
+
+    Público (sem autenticação) para monitoramento externo.
+
+    Returns:
+        JSON com estado completo do sistema
+    """
+    try:
+        from token_sync.sync_service import get_service_instance
+        from token_sync.config import MAX_ABSOLUTE_FAILURES
+        service = get_service_instance()
+
+        consecutive = service.consecutive_errors
+        paused = service.paused
+
+        # Determinar status geral
+        if paused:
+            status = "paused"
+        elif consecutive >= MAX_ABSOLUTE_FAILURES:
+            status = "critical"
+        elif consecutive >= 10:
+            status = "degraded"
+        elif consecutive >= 3:
+            status = "warning"
+        else:
+            status = "healthy"
+
+        # Calcular próximo retry (se houver)
+        next_retry_minutes = None
+        if consecutive >= 3 and not paused:
+            if consecutive < 5:
+                next_retry_minutes = 4
+            elif consecutive < 10:
+                next_retry_minutes = 8
+            else:
+                next_retry_minutes = 16
+
+        # Calcular tempo desde última sync
+        minutes_since_sync = None
+        if service.last_sync:
+            minutes_since_sync = (datetime.utcnow() - service.last_sync).total_seconds() / 60
+
+        return {
+            "status": status,
+            "service": "token-sync",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "sync_stats": {
+                "total_syncs": service.sync_count,
+                "successful_syncs": service.success_count,
+                "failed_syncs": service.error_count,
+                "success_rate": round((service.success_count / service.sync_count * 100), 2) if service.sync_count > 0 else 0
+            },
+            "current_state": {
+                "paused": paused,
+                "consecutive_errors": consecutive,
+                "circuit_breaker_active": consecutive >= 3,
+                "near_limit": consecutive >= (MAX_ABSOLUTE_FAILURES * 0.8),
+                "max_failures_limit": MAX_ABSOLUTE_FAILURES
+            },
+            "last_sync": {
+                "timestamp": service.last_sync.isoformat() + "Z" if service.last_sync else None,
+                "success": service.last_sync_success,
+                "minutes_ago": round(minutes_since_sync, 1) if minutes_since_sync else None
+            },
+            "next_action": {
+                "retry_in_minutes": next_retry_minutes,
+                "action_required": "manual_reset" if paused else ("check_logs" if consecutive >= 10 else None)
+            },
+            "endpoints": {
+                "reset": "POST /api/sync/reset",
+                "pause": "POST /api/sync/pause",
+                "resume": "POST /api/sync/resume",
+                "manual_sync": "POST /api/sync-tokens"
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Erro no health check: {e}")
+        return {
+            "status": "error",
+            "service": "token-sync",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
 
 @app.get("/")
 async def root():

@@ -55,7 +55,7 @@ def kill_orphan_chrome_processes():
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
-                    timeout=5,
+                    timeout=10,  # Aumentado de 5s para 10s (reduz Errno 11)
                     text=True
                 )
                 if result.returncode == 0:
@@ -92,6 +92,7 @@ class TokenSyncService:
         self.success_count = 0
         self.error_count = 0
         self.consecutive_errors = 0
+        self.paused = False  # Flag para pausar sistema após muitos erros
         self.service_start_time = datetime.utcnow()
 
         logger.info("=" * 60)
@@ -119,7 +120,7 @@ class TokenSyncService:
             killed_count, cleanup_success = kill_orphan_chrome_processes()
             if killed_count > 0:
                 logger.info(f"🧹 {killed_count} tipos de processos órfãos mortos")
-                time.sleep(2)  # Aguardar processos terminarem completamente
+                time.sleep(1)  # Aguardar processos terminarem (reduzido de 2s para 1s)
 
             # PASSO 2: Criar driver Chrome
             driver = create_driver(headless=SELENIUM_HEADLESS)
@@ -380,7 +381,7 @@ class TokenSyncService:
             logger.info("=" * 60)
             return False
 
-    def perform_sync_with_timeout(self, timeout_seconds=100):
+    def perform_sync_with_timeout(self, timeout_seconds=120):
         """
         Executa perform_sync com timeout.
 
@@ -422,6 +423,36 @@ class TokenSyncService:
         Returns:
             bool: True se eventualmente bem-sucedida, False se todas tentativas falharam
         """
+        # Verificar se sistema está pausado
+        if self.paused:
+            logger.critical("🛑 Sistema PAUSADO - sync bloqueada")
+            logger.critical("   Use endpoint /api/sync/reset para despausar")
+            return False
+
+        # Auto-reset temporal: se passou 24h sem sucesso, resetar contador
+        if self.consecutive_errors > 0 and self.last_sync:
+            hours_since_last = (datetime.utcnow() - self.last_sync).total_seconds() / 3600
+            if hours_since_last >= 24:
+                old_errors = self.consecutive_errors
+                self.consecutive_errors = 0
+                logger.warning("=" * 60)
+                logger.warning("⏰ AUTO-RESET TEMPORAL: 24h desde última tentativa")
+                logger.warning(f"   Erros consecutivos resetados: {old_errors} → 0")
+                logger.warning("   Sistema tentará novamente sem circuit breaker")
+                logger.warning("=" * 60)
+
+        # Limite máximo absoluto: parar se atingir MAX_ABSOLUTE_FAILURES
+        if self.consecutive_errors >= MAX_ABSOLUTE_FAILURES:
+            self.paused = True
+            logger.critical("=" * 60)
+            logger.critical(f"🛑 LIMITE MÁXIMO ATINGIDO: {self.consecutive_errors} erros consecutivos")
+            logger.critical(f"   Limite configurado: {MAX_ABSOLUTE_FAILURES}")
+            logger.critical("   Sistema PAUSADO - intervenção manual necessária")
+            logger.critical("   Use POST /api/sync/reset para resetar e despausar")
+            logger.critical("=" * 60)
+            self.send_critical_alert(f"Sistema pausado após {self.consecutive_errors} erros consecutivos!")
+            return False
+
         # Circuit breaker: se muitos erros consecutivos, aguardar mais tempo
         if self.consecutive_errors >= 3:
             # Aumentar tempo de espera progressivamente
@@ -440,8 +471,8 @@ class TokenSyncService:
         for attempt in range(1, MAX_RETRY_ATTEMPTS + 1):
             logger.info(f"🔄 Tentativa {attempt} de {MAX_RETRY_ATTEMPTS}")
 
-            # Usar versão com timeout (100s)
-            if self.perform_sync_with_timeout(timeout_seconds=100):
+            # Usar versão com timeout (120s - maior margem de segurança)
+            if self.perform_sync_with_timeout(timeout_seconds=120):
                 return True
 
             if attempt < MAX_RETRY_ATTEMPTS:

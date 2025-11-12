@@ -59,7 +59,7 @@ class TokenScheduler:
             timezone="UTC",
             job_defaults={
                 'coalesce': True,  # Se múltiplas execuções pendentes, executar apenas uma
-                'max_instances': 2,  # Permitir 2 instâncias para evitar locks
+                'max_instances': 1,  # Apenas 1 instância por vez para evitar contenção
                 'misfire_grace_time': 120  # Aceitar execução até 2min atrasada
             }
         )

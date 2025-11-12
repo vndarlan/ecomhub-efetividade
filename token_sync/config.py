@@ -30,9 +30,9 @@ ECOMHUB_PASSWORD = os.getenv("ECOMHUB_PASSWORD", "Chegou123!")
 # Habilitar/desabilitar sincronização automática
 TOKEN_SYNC_ENABLED = os.getenv("TOKEN_SYNC_ENABLED", "false").lower() == "true"
 
-# Duração estimada dos tokens em minutos (será descoberto pelo teste)
-# Valor padrão de 60 minutos é conservador
-TOKEN_DURATION_MINUTES = int(os.getenv("TOKEN_DURATION_MINUTES", "60"))
+# Duração estimada dos tokens em minutos
+# Token expira em 3 minutos (tempo real de expiração no EcomHub)
+TOKEN_DURATION_MINUTES = int(os.getenv("TOKEN_DURATION_MINUTES", "3"))
 
 # Intervalo de sincronização em minutos
 # Por padrão, renova com 30% de margem de segurança
@@ -75,6 +75,10 @@ RETRY_EXPONENTIAL_BACKOFF = os.getenv("RETRY_EXPONENTIAL_BACKOFF", "true").lower
 
 # Número máximo de falhas consecutivas antes de alertar
 MAX_CONSECUTIVE_FAILURES = int(os.getenv("MAX_CONSECUTIVE_FAILURES", "3"))
+
+# Limite máximo absoluto de erros consecutivos antes de pausar sistema
+# Após atingir este limite, o sistema para de tentar até reset manual
+MAX_ABSOLUTE_FAILURES = int(os.getenv("MAX_ABSOLUTE_FAILURES", "100"))
 
 # ===========================
 # Configurações de Monitoramento
