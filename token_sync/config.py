@@ -121,9 +121,16 @@ VALIDATION_TEST_COUNTRY_ID = int(os.getenv("VALIDATION_TEST_COUNTRY_ID", "164"))
 # ===========================
 
 # Habilitar refresh via HTTP (usa refresh_token para renovar sem Selenium)
-# Quando habilitado, só usa Selenium quando refresh_token expira (a cada 48h)
-# CORREÇÃO: A API usa GET, não POST! Agora funciona corretamente.
-ENABLE_HTTP_REFRESH = os.getenv("ENABLE_HTTP_REFRESH", "true").lower() == "true"
+# DESABILITADO: Após investigação, o servidor só renova tokens via Set-Cookie
+# quando o token JÁ EXPIROU, não antes. Como precisamos renovar ANTES da
+# expiração (proativo), o HTTP refresh não funciona para este caso de uso.
+# Selenium é necessário para renovação proativa.
+#
+# Testes mostraram:
+# - Requisição GET retorna 200 OK com dados
+# - MAS não retorna Set-Cookie com novos tokens
+# - Tokens só são renovados automaticamente após expiração (reativo)
+ENABLE_HTTP_REFRESH = os.getenv("ENABLE_HTTP_REFRESH", "false").lower() == "true"
 
 # URL da API EcomHub para fazer requisições de refresh
 ECOMHUB_API_URL = os.getenv("ECOMHUB_API_URL", "https://api.ecomhub.app/api/orders")
