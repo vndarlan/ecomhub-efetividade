@@ -32,7 +32,7 @@ try:
 except ImportError:
     limiter = None
     RATE_LIMITING_ENABLED = False
-    print("⚠️ SlowAPI não instalado - Rate limiting desabilitado")
+    print("AVISO: SlowAPI nao instalado - Rate limiting desabilitado")
 
 app = FastAPI(title="EcomHub Selenium Automation", version="1.0.0")
 
@@ -126,8 +126,6 @@ class AuthResponse(BaseModel):
     headers: Dict[str, str]
     timestamp: str
     message: str
-    expires_in: Optional[int] = None  # segundos até expirar
-    expires_at: Optional[str] = None  # timestamp de expiração
 
 # Configurações
 ECOMHUB_URL = "https://go.ecomhub.app/login"
@@ -991,81 +989,89 @@ async def pedidos_status_tracking(
 @apply_rate_limit("30/minute")
 async def get_auth_tokens(request: Request, api_key: str = Depends(verify_api_key)):
     """
-    Retorna os tokens de autenticação armazenados no banco de dados
+    Obtém tokens de autenticação do EcomHub via Selenium on-demand.
 
-    Os tokens são atualizados automaticamente a cada 2 minutos pela thread de sincronização.
-    Este endpoint apenas lê os tokens já disponíveis no banco, sem fazer novo login.
+    IMPORTANTE:
+    - Este endpoint cria um driver Chrome a cada chamada (~50 segundos)
+    - Tokens expiram em aproximadamente 3 minutos
+    - Recomenda-se fazer cache dos tokens por 2-3 minutos
 
     Returns:
-        AuthResponse com os tokens atuais ou erro se não houver tokens disponíveis
+        AuthResponse com cookies, headers e timestamp dos tokens obtidos
     """
+    driver = None
+
     try:
-        logger.info("📖 Lendo tokens do banco de dados...")
+        logger.info("🔑 Requisição de tokens recebida")
+        logger.info(f"   Cliente: {request.client.host if request.client else 'unknown'}")
 
-        # Importar e usar o banco de dados
-        try:
-            from token_sync.database import get_database
-            db = get_database()
-        except Exception as e:
-            logger.error(f"❌ Erro ao acessar banco de dados: {e}")
+        # Detectar ambiente (local = browser visível)
+        headless = os.getenv("ENVIRONMENT") != "local"
+
+        # Criar driver Chrome
+        logger.info("🚗 Criando ChromeDriver...")
+        driver = create_driver(headless=headless)
+        logger.info("✅ ChromeDriver criado com sucesso")
+
+        # Fazer login no EcomHub
+        logger.info("🔐 Fazendo login no EcomHub...")
+        login_success = login_ecomhub(driver)
+
+        if not login_success:
+            logger.error("❌ Falha no login do EcomHub")
             raise HTTPException(
-                status_code=503,
-                detail="Sistema de tokens temporariamente indisponível"
+                status_code=500,
+                detail="Falha ao fazer login no EcomHub. Verifique as credenciais."
             )
 
-        # Obter tokens do banco
-        tokens_data = db.get_tokens()
+        logger.info("✅ Login realizado com sucesso")
 
-        if not tokens_data:
-            logger.warning("⚠️ Nenhum token disponível no banco")
-            raise HTTPException(
-                status_code=503,
-                detail="Tokens não disponíveis. Aguarde a sincronização automática (executa a cada 2 minutos)"
-            )
+        # Extrair cookies de autenticação
+        logger.info("📦 Extraindo cookies de autenticação...")
+        cookies = get_auth_cookies(driver)
 
-        # Verificar se tokens ainda são válidos
-        if not tokens_data.get('is_valid', False):
-            logger.warning("⚠️ Tokens expirados no banco")
-            raise HTTPException(
-                status_code=503,
-                detail=f"Tokens expirados. Última atualização: {tokens_data.get('updated_at')}. Aguarde nova sincronização."
-            )
-
-        # Preparar cookies dict
-        cookies = tokens_data.get('cookies', {})
         if not cookies:
-            # Se não tiver cookies completos, montar com os tokens individuais
-            cookies = {
-                'token': tokens_data.get('token', ''),
-                'e_token': tokens_data.get('e_token', ''),
-                'refresh_token': tokens_data.get('refresh_token', '')
-            }
+            logger.error("❌ Nenhum cookie obtido após login")
+            raise HTTPException(
+                status_code=500,
+                detail="Nenhum cookie obtido após login. Verifique a configuração."
+            )
 
-        # Criar cookie string
-        cookie_string = "; ".join([f"{k}={v}" for k, v in cookies.items()])
+        logger.info(f"✅ Cookies extraídos: {list(cookies.keys())}")
 
-        # Headers padrão para usar com a API
+        # Extrair User-Agent do browser
+        try:
+            user_agent = driver.execute_script("return navigator.userAgent;")
+        except:
+            user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+
+        # Preparar headers padrão para API EcomHub
         headers = {
             "Accept": "*/*",
             "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Content-Type": "application/json",
             "Origin": "https://go.ecomhub.app",
             "Referer": "https://go.ecomhub.app/",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "X-Requested-With": "XMLHttpRequest",
-            "Content-Type": "application/json"
+            "User-Agent": user_agent,
+            "X-Requested-With": "XMLHttpRequest"
         }
 
-        logger.info(f"✅ Tokens lidos com sucesso. Expira em: {tokens_data.get('expires_in')} segundos")
+        # Calcular timestamp atual
+        current_time = datetime.utcnow()
+
+        # Criar cookie_string formatado
+        cookie_string = "; ".join([f"{k}={v}" for k, v in cookies.items()])
+
+        logger.info(f"✅ Tokens obtidos com sucesso!")
+        logger.info(f"   Timestamp: {current_time.isoformat()}")
 
         return AuthResponse(
             success=True,
             cookies=cookies,
             cookie_string=cookie_string,
             headers=headers,
-            timestamp=tokens_data.get('updated_at', datetime.utcnow().isoformat()),
-            expires_in=tokens_data.get('expires_in', 0),
-            expires_at=tokens_data.get('expires_at', ''),
-            message=f"Tokens válidos. Expira em {tokens_data.get('expires_in', 0)} segundos"
+            timestamp=current_time.isoformat() + "Z",
+            message="Tokens obtidos com sucesso. Expiram em ~3 minutos."
         )
 
     except HTTPException:
@@ -1074,301 +1080,16 @@ async def get_auth_tokens(request: Request, api_key: str = Depends(verify_api_ke
         logger.error(f"❌ Erro ao obter tokens: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Erro interno ao obter tokens: {str(e)}"
+            detail=f"Erro ao obter tokens: {str(e)}"
         )
-
-@app.get("/api/auth/status")
-@apply_rate_limit("30/minute")
-async def get_auth_status(request: Request, api_key: str = Depends(verify_api_key)):
-    """
-    Retorna o status do sistema de sincronização de tokens
-
-    Mostra informações sobre:
-    - Se há tokens disponíveis
-    - Última atualização
-    - Tempo até expirar
-    - Status da sincronização
-    """
-    try:
-        try:
-            from token_sync.database import get_database
-            db = get_database()
-            # Obter status do banco
-            status = db.get_status()
-        except Exception as e:
-            logger.error(f"Erro ao acessar banco de dados: {e}")
-            status = {
-                'status': 'database_error',
-                'has_tokens': False,
-                'db_available': False,
-                'error': str(e)
-            }
-
-        # Adicionar informações da thread se estiver rodando
-        if os.getenv("TOKEN_SYNC_ENABLED", "false").lower() == "true":
-            status['sync_enabled'] = True
-            status['sync_interval'] = "2 minutos"
-        else:
-            status['sync_enabled'] = False
-            status['message'] = "Sincronização automática desabilitada. Configure TOKEN_SYNC_ENABLED=true"
-
-        return status
-
-    except Exception as e:
-        logger.error(f"Erro ao obter status: {e}")
-        return {
-            'status': 'error',
-            'error': str(e),
-            'has_tokens': False
-        }
-
-@app.post("/api/sync-tokens")
-@apply_rate_limit("10/minute")
-async def trigger_sync(request: Request):
-    """
-    Endpoint para n8n disparar sincronização manual de tokens
-
-    Este endpoint deve ser chamado pelo n8n a cada 2 minutos.
-    Protegido por API key no header X-Sync-Key.
-
-    Headers necessários:
-        X-Sync-Key: Chave configurada em SYNC_API_KEY
-
-    Returns:
-        JSON com resultado da sincronização
-    """
-    # Verificar API key específica para sync
-    sync_api_key = request.headers.get("X-Sync-Key")
-    expected_sync_key = os.getenv("SYNC_API_KEY")
-
-    if not expected_sync_key:
-        logger.error("❌ SYNC_API_KEY não configurada no servidor")
-        raise HTTPException(
-            status_code=500,
-            detail="Servidor mal configurado - SYNC_API_KEY não definida"
-        )
-
-    if not sync_api_key:
-        raise HTTPException(
-            status_code=401,
-            detail="Header X-Sync-Key não fornecido"
-        )
-
-    if sync_api_key != expected_sync_key:
-        logger.warning(f"⚠️ Tentativa de sync com key inválida de {request.client.host}")
-        raise HTTPException(
-            status_code=401,
-            detail="X-Sync-Key inválida"
-        )
-
-    logger.info(f"🔄 Sync manual disparada por {request.client.host}")
-
-    try:
-        from token_sync.sync_service import get_service_instance
-        service = get_service_instance()
-
-        # Executar sincronização com retry
-        success = service.perform_sync_with_retry()
-
-        if success:
-            return {
-                "success": True,
-                "message": "Sincronização concluída com sucesso",
-                "sync_number": service.sync_count,
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-                "next_sync_in_minutes": 2
-            }
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail="Sincronização falhou após todas as tentativas"
-            )
-
-    except Exception as e:
-        logger.error(f"❌ Erro na sincronização manual: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro na sincronização: {str(e)}"
-        )
-
-@app.post("/api/sync/reset")
-@apply_rate_limit("10/minute")
-async def reset_sync_state(request: Request):
-    """
-    Endpoint para resetar o estado da sincronização
-
-    Reseta contador de erros consecutivos e despausa o sistema.
-    Protegido por API key no header X-Sync-Key.
-
-    Headers necessários:
-        X-Sync-Key: Chave configurada em SYNC_API_KEY
-
-    Returns:
-        JSON com resultado do reset
-    """
-    # Verificar API key
-    sync_api_key = request.headers.get("X-Sync-Key")
-    expected_sync_key = os.getenv("SYNC_API_KEY")
-
-    if not expected_sync_key:
-        raise HTTPException(
-            status_code=500,
-            detail="Servidor mal configurado - SYNC_API_KEY não definida"
-        )
-
-    if not sync_api_key or sync_api_key != expected_sync_key:
-        logger.warning(f"⚠️ Tentativa de reset com key inválida de {request.client.host}")
-        raise HTTPException(
-            status_code=401,
-            detail="X-Sync-Key ausente ou inválida"
-        )
-
-    try:
-        from token_sync.sync_service import get_service_instance
-        service = get_service_instance()
-
-        old_consecutive = service.consecutive_errors
-        old_paused = service.paused
-
-        # Reset completo
-        service.consecutive_errors = 0
-        service.paused = False
-
-        logger.warning(f"🔄 RESET MANUAL executado por {request.client.host}")
-        logger.warning(f"   Erros consecutivos: {old_consecutive} → 0")
-        logger.warning(f"   Sistema pausado: {old_paused} → False")
-
-        return {
-            "success": True,
-            "message": "Estado da sincronização resetado com sucesso",
-            "previous_consecutive_errors": old_consecutive,
-            "previous_paused": old_paused,
-            "current_consecutive_errors": 0,
-            "current_paused": False,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        }
-
-    except Exception as e:
-        logger.error(f"❌ Erro no reset: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao resetar: {str(e)}"
-        )
-
-@app.post("/api/sync/pause")
-@apply_rate_limit("10/minute")
-async def pause_sync(request: Request):
-    """
-    Endpoint para pausar a sincronização
-
-    Para todas as tentativas de sincronização até ser despausado.
-    Protegido por API key no header X-Sync-Key.
-
-    Headers necessários:
-        X-Sync-Key: Chave configurada em SYNC_API_KEY
-
-    Returns:
-        JSON confirmando a pausa
-    """
-    # Verificar API key
-    sync_api_key = request.headers.get("X-Sync-Key")
-    expected_sync_key = os.getenv("SYNC_API_KEY")
-
-    if not expected_sync_key:
-        raise HTTPException(
-            status_code=500,
-            detail="Servidor mal configurado - SYNC_API_KEY não definida"
-        )
-
-    if not sync_api_key or sync_api_key != expected_sync_key:
-        logger.warning(f"⚠️ Tentativa de pause com key inválida de {request.client.host}")
-        raise HTTPException(
-            status_code=401,
-            detail="X-Sync-Key ausente ou inválida"
-        )
-
-    try:
-        from token_sync.sync_service import get_service_instance
-        service = get_service_instance()
-
-        service.paused = True
-        logger.warning(f"⏸️ Sistema PAUSADO manualmente por {request.client.host}")
-
-        return {
-            "success": True,
-            "message": "Sistema pausado com sucesso",
-            "paused": True,
-            "consecutive_errors": service.consecutive_errors,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        }
-
-    except Exception as e:
-        logger.error(f"❌ Erro ao pausar: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao pausar: {str(e)}"
-        )
-
-@app.post("/api/sync/resume")
-@apply_rate_limit("10/minute")
-async def resume_sync(request: Request):
-    """
-    Endpoint para despausar a sincronização
-
-    Despausa o sistema e opcionalmente reseta o contador de erros.
-    Protegido por API key no header X-Sync-Key.
-
-    Headers necessários:
-        X-Sync-Key: Chave configurada em SYNC_API_KEY
-
-    Returns:
-        JSON confirmando o resume
-    """
-    # Verificar API key
-    sync_api_key = request.headers.get("X-Sync-Key")
-    expected_sync_key = os.getenv("SYNC_API_KEY")
-
-    if not expected_sync_key:
-        raise HTTPException(
-            status_code=500,
-            detail="Servidor mal configurado - SYNC_API_KEY não definida"
-        )
-
-    if not sync_api_key or sync_api_key != expected_sync_key:
-        logger.warning(f"⚠️ Tentativa de resume com key inválida de {request.client.host}")
-        raise HTTPException(
-            status_code=401,
-            detail="X-Sync-Key ausente ou inválida"
-        )
-
-    try:
-        from token_sync.sync_service import get_service_instance
-        service = get_service_instance()
-
-        old_consecutive = service.consecutive_errors
-
-        # Despausar e resetar erros
-        service.paused = False
-        service.consecutive_errors = 0
-
-        logger.info(f"▶️ Sistema DESPAUSADO por {request.client.host}")
-        logger.info(f"   Erros consecutivos resetados: {old_consecutive} → 0")
-
-        return {
-            "success": True,
-            "message": "Sistema despausado com sucesso",
-            "paused": False,
-            "previous_consecutive_errors": old_consecutive,
-            "current_consecutive_errors": 0,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        }
-
-    except Exception as e:
-        logger.error(f"❌ Erro ao despausar: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao despausar: {str(e)}"
-        )
+    finally:
+        # SEMPRE fechar driver
+        if driver:
+            try:
+                driver.quit()
+                logger.info("✅ Driver fechado com sucesso")
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao fechar driver: {e}")
 
 @app.get("/health")
 async def health_check():
@@ -2068,56 +1789,6 @@ async def processar_ecomhub_legacy_api(
 if __name__ == "__main__":
     import uvicorn
 
-    # ============================================
-    # SINCRONIZAÇÃO DE TOKENS - DUAS OPÇÕES:
-    # ============================================
-    # OPÇÃO 1 (RECOMENDADA): n8n External Scheduler
-    #   - Configure n8n para chamar POST /api/sync-tokens a cada 2 minutos
-    #   - Header: X-Sync-Key: [valor de SYNC_API_KEY]
-    #   - Mais estável, sem sobreposição, melhor monitoring
-    #   - TOKEN_SYNC_ENABLED deve ser "false" (padrão)
-    #
-    # OPÇÃO 2: Scheduler Interno (APScheduler)
-    #   - Configure TOKEN_SYNC_ENABLED=true
-    #   - Roda em thread background
-    #   - Pode ter problemas de sobreposição se jobs demorarem >2min
-    # ============================================
-
-    if os.getenv("TOKEN_SYNC_ENABLED", "false").lower() == "true":
-        logger.warning("=" * 60)
-        logger.warning("⚠️ SCHEDULER INTERNO HABILITADO")
-        logger.warning("⚠️ Recomendamos usar n8n external scheduler ao invés!")
-        logger.warning("⚠️ Para desabilitar: TOKEN_SYNC_ENABLED=false")
-        logger.warning("=" * 60)
-
-        logger.info("🔄 Iniciando serviço de sincronização de tokens...")
-        try:
-            from threading import Thread
-
-            def safe_start_sync():
-                """Função wrapper para proteger o início da sincronização"""
-                try:
-                    from token_sync.scheduler import start_background_sync
-                    start_background_sync()
-                except Exception as sync_error:
-                    logger.error(f"❌ Erro na thread de sincronização: {sync_error}")
-                    logger.warning("⚠️ Sincronização falhando, mas servidor continua funcionando")
-
-            # Iniciar em thread separada para não bloquear o servidor
-            sync_thread = Thread(target=safe_start_sync, daemon=True, name="TokenSyncThread")
-            sync_thread.start()
-            logger.info("✅ Serviço de sincronização iniciado em background (a cada 2 minutos)")
-        except Exception as e:
-            logger.error(f"❌ Erro ao iniciar sincronização de tokens: {e}")
-            logger.info("⚠️ Continuando sem sincronização automática...")
-    else:
-        logger.info("=" * 60)
-        logger.info("ℹ️ Scheduler interno DESABILITADO (modo n8n)")
-        logger.info("ℹ️ Configure n8n para chamar POST /api/sync-tokens a cada 2min")
-        logger.info("ℹ️ Variáveis necessárias:")
-        logger.info("   - SYNC_API_KEY: Chave para proteger o endpoint")
-        logger.info("=" * 60)
-
-    # Iniciar servidor FastAPI normalmente
+    # Iniciar servidor FastAPI
     port = int(os.getenv("PORT", 8001))
     uvicorn.run(app, host="0.0.0.0", port=port)

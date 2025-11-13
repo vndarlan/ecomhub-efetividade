@@ -23,13 +23,17 @@ X-API-Key: sua-chave-api-aqui
 | `/api/processar-ecomhub/` | 5 requisições/minuto |
 | `/api/pedidos-status-tracking/` | 10 requisições/minuto |
 | `/api/auth` | 30 requisições/minuto |
-| `/api/auth/status` | 30 requisições/minuto |
 
 ## Endpoints
 
 ### 1. Obter Tokens de Autenticação
 
-Retorna tokens válidos do EcomHub para uso direto com a API deles.
+Retorna tokens válidos do EcomHub obtidos via Selenium on-demand.
+
+⚠️ **IMPORTANTE**:
+- Cada requisição cria um driver Chrome e executa login completo (~50 segundos)
+- Tokens expiram em aproximadamente 3 minutos
+- Recomenda-se fazer cache dos tokens por 2-3 minutos no seu sistema
 
 **GET** `/api/auth`
 
@@ -52,19 +56,18 @@ X-API-Key: sua-chave-api
     "Accept": "*/*",
     "Content-Type": "application/json",
     "Origin": "https://go.ecomhub.app",
-    "Referer": "https://go.ecomhub.app/"
+    "Referer": "https://go.ecomhub.app/",
+    "User-Agent": "Mozilla/5.0..."
   },
-  "timestamp": "2024-11-08T15:30:00",
-  "expires_in": 120,
-  "expires_at": "2024-11-08T15:33:00",
-  "message": "Tokens válidos. Expira em 120 segundos"
+  "timestamp": "2024-11-08T15:30:00Z",
+  "message": "Tokens obtidos com sucesso. Expiram em ~3 minutos."
 }
 ```
 
-**Resposta de Erro (503):**
+**Resposta de Erro (500):**
 ```json
 {
-  "detail": "Tokens não disponíveis. Aguarde a sincronização automática"
+  "detail": "Falha ao fazer login no EcomHub"
 }
 ```
 
@@ -162,30 +165,6 @@ Content-Type: application/json
   "total_pedidos": 50,
   "data_sincronizacao": "2024-11-08T15:30:00Z",
   "pais_processado": "Espanha"
-}
-```
-
-### 4. Status do Sistema
-
-Verifica o status do sistema de sincronização de tokens.
-
-**GET** `/api/auth/status`
-
-**Headers:**
-```http
-X-API-Key: sua-chave-api
-```
-
-**Resposta (200):**
-```json
-{
-  "status": "active",
-  "has_tokens": true,
-  "expires_in": 120,
-  "last_update": "2024-11-08 15:30:00",
-  "sync_enabled": true,
-  "sync_interval": "2 minutos",
-  "db_available": true
 }
 ```
 

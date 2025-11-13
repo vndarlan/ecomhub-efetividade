@@ -24,27 +24,41 @@ Esta documentação mapeia **TODOS** os campos retornados pela API oficial da Ec
 
 ### Usando Este Servidor (Recomendado)
 
-**Este servidor mantém tokens sempre atualizados!** Ao invés de fazer login manualmente, use o endpoint `/api/auth`:
+**Este servidor obtém tokens on-demand via Selenium!** Ao invés de fazer login manualmente, use o endpoint `/api/auth`:
 
 ```bash
-# Obter tokens atualizados automaticamente
-curl https://ecomhub-selenium-production.up.railway.app/api/auth
+# Obter tokens via Selenium on-demand
+curl -H "X-API-Key: sua-chave-api" \
+  https://ecomhub-selenium-production.up.railway.app/api/auth
 ```
 
 **Resposta:**
 ```json
 {
-  "token": "eyJhbGciOiJIUzI1...",
-  "e_token": "eyJhbGciOiJIUzI1...",
-  "refresh_token": "eyJhbGciOiJIUzI1...",
-  "timestamp": "2025-11-11T14:00:00.000Z"
+  "success": true,
+  "cookies": {
+    "token": "eyJhbGciOiJIUzI1...",
+    "e_token": "eyJhbGciOiJIUzI1...",
+    "refresh_token": "eyJhbGciOiJIUzI1..."
+  },
+  "cookie_string": "token=eyJ...;e_token=eyJ...;refresh_token=eyJ...",
+  "headers": {
+    "Accept": "*/*",
+    "Content-Type": "application/json",
+    "Origin": "https://go.ecomhub.app",
+    "Referer": "https://go.ecomhub.app/",
+    "User-Agent": "Mozilla/5.0..."
+  },
+  "timestamp": "2025-11-11T14:00:00.000Z",
+  "message": "Tokens obtidos com sucesso. Expiram em ~3 minutos."
 }
 ```
 
-**Vantagens:**
-- ✅ Tokens renovados automaticamente a cada **2 minutos**
-- ✅ Sempre válidos (não expiram durante o uso)
-- ✅ Não precisa configurar Selenium
+**Características:**
+- ⚠️ Cada requisição cria um driver Chrome e executa login (~50 segundos)
+- ⏱️ Tokens expiram em aproximadamente **3 minutos**
+- 💡 Recomenda-se fazer cache dos tokens por 2-3 minutos no seu sistema
+- ✅ Não precisa configurar Selenium manualmente
 - ✅ Endpoint disponível 24/7
 
 ### Cookies Necessários
@@ -57,7 +71,7 @@ Para chamar a API da EcomHub, use os cookies retornados pelo endpoint `/api/auth
 | `e_token` | Token estendido/alternativo | `/api/auth` |
 | `refresh_token` | Token para renovação | `/api/auth` (opcional) |
 
-**Duração dos Tokens:** ~3 minutos (mas este servidor renova automaticamente!)
+**Duração dos Tokens:** ~3 minutos (faça cache para evitar requisições desnecessárias)
 
 ### Headers Obrigatórios
 

@@ -19,7 +19,13 @@
       "Bash(nul)",
       "Bash(dir:*)",
       "Bash(findstr:*)",
-      "Bash(del test_ecomhub_api_real.py test_get_order.py test_railway_api.py test_railway_api_extended.py get_raw_order.py get_raw_order_final.py resposta_railway.json resposta_railway_30days.json)"
+      "Bash(del test_ecomhub_api_real.py test_get_order.py test_railway_api.py test_railway_api_extended.py get_raw_order.py get_raw_order_final.py resposta_railway.json resposta_railway_30days.json)",
+      "Bash(git tag:*)",
+      "Bash(ping:*)",
+      "Bash(del:*)",
+      "Bash(pip install:*)",
+      "Bash(run_server_test.bat)",
+      "Bash(cmd /c run_server_test.bat)"
     ],
     "deny": [],
     "ask": []
