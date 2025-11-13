@@ -22,7 +22,7 @@ Esta documentação mapeia **TODOS** os campos retornados pela API oficial da Ec
 
 ## 🔐 1. AUTENTICAÇÃO
 
-### Usando Este Servidor (Recomendado)
+### Usando Este Servidor
 
 **Este servidor obtém tokens on-demand via Selenium!** Ao invés de fazer login manualmente, use o endpoint `/api/auth`:
 
@@ -57,8 +57,6 @@ curl -H "X-API-Key: sua-chave-api" \
 **Características:**
 - ⚠️ Cada requisição cria um driver Chrome e executa login (~50 segundos)
 - ⏱️ Tokens expiram em aproximadamente **3 minutos**
-- 💡 Recomenda-se fazer cache dos tokens por 2-3 minutos no seu sistema
-- ✅ Não precisa configurar Selenium manualmente
 - ✅ Endpoint disponível 24/7
 
 ### Cookies Necessários
@@ -71,7 +69,7 @@ Para chamar a API da EcomHub, use os cookies retornados pelo endpoint `/api/auth
 | `e_token` | Token estendido/alternativo | `/api/auth` |
 | `refresh_token` | Token para renovação | `/api/auth` (opcional) |
 
-**Duração dos Tokens:** ~3 minutos (faça cache para evitar requisições desnecessárias)
+**Duração dos Tokens:** ~3 minutos
 
 ### Headers Obrigatórios
 

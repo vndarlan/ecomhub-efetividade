@@ -33,7 +33,6 @@ Retorna tokens válidos do EcomHub obtidos via Selenium on-demand.
 ⚠️ **IMPORTANTE**:
 - Cada requisição cria um driver Chrome e executa login completo (~50 segundos)
 - Tokens expiram em aproximadamente 3 minutos
-- Recomenda-se fazer cache dos tokens por 2-3 minutos no seu sistema
 
 **GET** `/api/auth`
 
@@ -178,97 +177,6 @@ Content-Type: application/json
 | 500 | Erro interno do servidor |
 | 503 | Serviço temporariamente indisponível |
 
-## Exemplos de Uso
-
-### cURL
-
-```bash
-# Obter tokens
-curl -H "X-API-Key: sua-chave-api" \
-  https://ecomhub-selenium-production.up.railway.app/api/auth
-
-# Processar pedidos
-curl -X POST \
-  -H "X-API-Key: sua-chave-api" \
-  -H "Content-Type: application/json" \
-  -d '{"data_inicio":"2024-11-01","data_fim":"2024-11-07","pais_id":"164"}' \
-  https://ecomhub-selenium-production.up.railway.app/api/processar-ecomhub/
-```
-
-### JavaScript/Fetch
-
-```javascript
-// Obter tokens
-const response = await fetch('https://ecomhub-selenium-production.up.railway.app/api/auth', {
-  headers: {
-    'X-API-Key': 'sua-chave-api'
-  }
-});
-const tokens = await response.json();
-
-// Processar pedidos
-const response = await fetch('https://ecomhub-selenium-production.up.railway.app/api/processar-ecomhub/', {
-  method: 'POST',
-  headers: {
-    'X-API-Key': 'sua-chave-api',
-    'Content-Type': 'application/json'
-  },
-  body: JSON.stringify({
-    data_inicio: '2024-11-01',
-    data_fim: '2024-11-07',
-    pais_id: '164'
-  })
-});
-const data = await response.json();
-```
-
-### Python/Requests
-
-```python
-import requests
-
-# Configurar headers
-headers = {
-    'X-API-Key': 'sua-chave-api'
-}
-
-# Obter tokens
-response = requests.get(
-    'https://ecomhub-selenium-production.up.railway.app/api/auth',
-    headers=headers
-)
-tokens = response.json()
-
-# Processar pedidos
-response = requests.post(
-    'https://ecomhub-selenium-production.up.railway.app/api/processar-ecomhub/',
-    headers=headers,
-    json={
-        'data_inicio': '2024-11-01',
-        'data_fim': '2024-11-07',
-        'pais_id': '164'
-    }
-)
-data = response.json()
-```
-
-### n8n Integration
-
-```json
-{
-  "method": "POST",
-  "url": "https://ecomhub-selenium-production.up.railway.app/api/processar-ecomhub/",
-  "headers": {
-    "X-API-Key": "{{$credentials.ecomhub.apiKey}}",
-    "Content-Type": "application/json"
-  },
-  "body": {
-    "data_inicio": "{{$json.data_inicio}}",
-    "data_fim": "{{$json.data_fim}}",
-    "pais_id": "164"
-  }
-}
-```
 
 ## Sobre a Análise de Efetividade
 
