@@ -332,18 +332,38 @@ def login_ecomhub(driver):
         logger.info(f"⏱️ Body carregado: {time.time() - step_time:.2f}s")
         logger.info(f"🔗 URL atual: {driver.current_url}")
 
+        # Verificar se há erros 500 na página
+        try:
+            console_logs = driver.get_log('browser')
+            error_500_count = sum(1 for log in console_logs if '500' in log.get('message', ''))
+            if error_500_count > 2:
+                logger.error(f"⚠️ Detectados {error_500_count} erros 500 na página do EcomHub")
+                logger.error("⚠️ O EcomHub pode estar com problemas no servidor")
+                raise Exception(f"EcomHub retornando erro 500 - servidor com problemas ({error_500_count} erros)")
+        except Exception as e:
+            if "500" in str(e):
+                raise e
+            # Ignorar outros erros de log
+            pass
+
         # Verificar se já está logado (verificar se NÃO está na página /login)
         if "/login" not in driver.current_url.lower():
             logger.info("✅ Já logado - redirecionando...")
             return True
 
         step_time = time.time()
-        email_field = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.ID, "input-email"))
-        )
-        email_field.clear()
-        email_field.send_keys(LOGIN_EMAIL)
-        logger.info(f"✅ Email preenchido ({time.time() - step_time:.2f}s)")
+        try:
+            email_field = WebDriverWait(driver, 15).until(
+                EC.element_to_be_clickable((By.ID, "input-email"))
+            )
+            email_field.clear()
+            email_field.send_keys(LOGIN_EMAIL)
+            logger.info(f"✅ Email preenchido ({time.time() - step_time:.2f}s)")
+        except Exception as e:
+            logger.error(f"❌ Campo de email não encontrado após 15s")
+            logger.error(f"🔗 URL atual: {driver.current_url}")
+            logger.error(f"📄 Página pode não ter carregado corretamente")
+            raise Exception(f"Campo de email não encontrado - página de login não carregou: {e}")
 
         step_time = time.time()
         password_field = WebDriverWait(driver, 15).until(
