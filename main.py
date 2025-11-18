@@ -332,8 +332,8 @@ def login_ecomhub(driver):
         logger.info(f"⏱️ Body carregado: {time.time() - step_time:.2f}s")
         logger.info(f"🔗 URL atual: {driver.current_url}")
 
-        # Verificar se já está logado
-        if "login" not in driver.current_url.lower():
+        # Verificar se já está logado (verificar se NÃO está na página /login)
+        if "/login" not in driver.current_url.lower():
             logger.info("✅ Já logado - redirecionando...")
             return True
 
@@ -395,7 +395,7 @@ def login_ecomhub(driver):
         step_time = time.time()
         try:
             WebDriverWait(driver, 20).until(
-                lambda d: "login" not in d.current_url.lower()
+                lambda d: "/login" not in d.current_url.lower()
             )
             logger.info(f"✅ Redirecionado para: {driver.current_url}")
             logger.info(f"⏱️ Redirecionamento: {time.time() - step_time:.2f}s")
