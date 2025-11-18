@@ -177,7 +177,8 @@ def create_driver(headless=True):
 
     # Porta de debugging dinâmica (evita conflitos entre múltiplas instâncias)
     import os as os_module
-    debug_port = 9000 + (os_module.getpid() % 1000)
+    debug_port = 9000 + (os_module.getpid() % 10000)
+    logger.info(f"🔌 Porta de debug: {debug_port}")
     options.add_argument(f"--remote-debugging-port={debug_port}")
     
     # Configurações de memória e performance (otimizado para Railway)
@@ -246,66 +247,173 @@ def retry_with_backoff(func, max_retries=3, backoff_factor=2):
         except Exception as e:
             if attempt == max_retries - 1:
                 raise e
-            
+
             wait_time = backoff_factor ** attempt
             logger.warning(f"❌ Tentativa {attempt + 1} falhou: {e}")
             logger.info(f"⏳ Aguardando {wait_time}s antes da próxima tentativa...")
             time.sleep(wait_time)
 
+def clean_driver_state(driver):
+    """Limpa cookies e cache do driver para evitar interferência entre requisições"""
+    logger.info("🧹 Limpando estado do driver...")
+
+    try:
+        # Limpar todos os cookies
+        driver.delete_all_cookies()
+        logger.info("✅ Cookies limpos")
+
+        # Limpar localStorage e sessionStorage via JavaScript
+        try:
+            driver.execute_script("window.localStorage.clear();")
+            driver.execute_script("window.sessionStorage.clear();")
+            logger.info("✅ LocalStorage e SessionStorage limpos")
+        except Exception as e:
+            logger.warning(f"⚠️ Não foi possível limpar storage: {e}")
+
+        logger.info("✅ Estado do driver limpo com sucesso")
+        return True
+
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao limpar estado do driver: {e}")
+        # Não falhar se limpeza falhar, apenas logar warning
+        return False
+
+def healthcheck_chrome(driver):
+    """Verifica se o Chrome está respondendo corretamente antes de prosseguir"""
+    logger.info("🏥 Executando healthcheck do Chrome...")
+
+    try:
+        # Teste 1: Verificar se consegue obter URL atual
+        current_url = driver.current_url
+        logger.info(f"✅ Chrome responde - URL: {current_url}")
+
+        # Teste 2: Verificar se consegue executar JavaScript
+        test_result = driver.execute_script("return 'OK';")
+        if test_result == "OK":
+            logger.info("✅ JavaScript executando corretamente")
+        else:
+            raise Exception("JavaScript não retornou valor esperado")
+
+        # Teste 3: Navegar para uma página simples e verificar
+        driver.get("about:blank")
+        if driver.current_url == "about:blank":
+            logger.info("✅ Navegação funcionando corretamente")
+        else:
+            raise Exception("Navegação não funcionou como esperado")
+
+        logger.info("✅ Healthcheck do Chrome: PASSOU")
+        return True
+
+    except Exception as e:
+        logger.error(f"❌ Healthcheck do Chrome: FALHOU - {e}")
+        raise Exception(f"Chrome não está respondendo corretamente: {e}")
+
 def login_ecomhub(driver):
     """Faz login no EcomHub com retry automático"""
     logger.info("Fazendo login no EcomHub...")
-    
-    def _do_login():
-        # Verificar se o driver ainda está ativo
-        try:
-            driver.current_url
-        except Exception:
-            raise Exception("Driver perdeu conexão - sessão inválida")
-        
-        driver.get(ECOMHUB_URL)
 
+    def _do_login():
+        start_time = time.time()
+
+        # Healthcheck do Chrome antes de prosseguir
+        healthcheck_chrome(driver)
+
+        # Limpar estado do driver para evitar interferência
+        clean_driver_state(driver)
+
+        step_time = time.time()
+        driver.get(ECOMHUB_URL)
+        logger.info(f"⏱️ Navegação para login: {time.time() - step_time:.2f}s")
+
+        step_time = time.time()
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
+        logger.info(f"⏱️ Body carregado: {time.time() - step_time:.2f}s")
+        logger.info(f"🔗 URL atual: {driver.current_url}")
 
         # Verificar se já está logado
         if "login" not in driver.current_url.lower():
             logger.info("✅ Já logado - redirecionando...")
             return True
-        
-        email_field = WebDriverWait(driver, 8).until(
+
+        step_time = time.time()
+        email_field = WebDriverWait(driver, 15).until(
             EC.element_to_be_clickable((By.ID, "input-email"))
         )
         email_field.clear()
         email_field.send_keys(LOGIN_EMAIL)
-        logger.info("✅ Email preenchido")
-        
-        password_field = WebDriverWait(driver, 8).until(
+        logger.info(f"✅ Email preenchido ({time.time() - step_time:.2f}s)")
+
+        step_time = time.time()
+        password_field = WebDriverWait(driver, 15).until(
             EC.element_to_be_clickable((By.ID, "input-password"))
         )
         password_field.clear()
         password_field.send_keys(LOGIN_PASSWORD)
-        logger.info("✅ Senha preenchida")
+        logger.info(f"✅ Senha preenchida ({time.time() - step_time:.2f}s)")
 
-        login_button = WebDriverWait(driver, 8).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "a[role='button'].btn.tone-default"))
-        )
-        
+        # Tentar múltiplos seletores para o botão de login (fallback robusto)
+        step_time = time.time()
+        login_button = None
+        selectors = [
+            (By.CSS_SELECTOR, "a[role='button'].btn.tone-default"),
+            (By.CSS_SELECTOR, "a.btn.tone-default"),
+            (By.CSS_SELECTOR, "button[type='submit']"),
+            (By.XPATH, "//a[contains(@class, 'btn') and contains(@class, 'tone-default')]"),
+            (By.XPATH, "//button[contains(text(), 'Login') or contains(text(), 'Entrar')]")
+        ]
+
+        last_error = None
+        for selector_type, selector_value in selectors:
+            try:
+                logger.info(f"🔍 Tentando seletor: {selector_type}={selector_value}")
+                login_button = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((selector_type, selector_value))
+                )
+                logger.info(f"✅ Botão encontrado com seletor: {selector_type}={selector_value}")
+                break
+            except Exception as e:
+                last_error = e
+                logger.warning(f"⚠️ Seletor {selector_type}={selector_value} falhou")
+                continue
+
+        if not login_button:
+            logger.error("❌ Nenhum seletor de botão funcionou")
+            raise Exception(f"Botão de login não encontrado com nenhum seletor. Último erro: {last_error}")
+
+        logger.info(f"⏱️ Botão localizado: {time.time() - step_time:.2f}s")
+
         driver.execute_script("arguments[0].scrollIntoView();", login_button)
-        time.sleep(1)
-        
-        login_button.click()
-        logger.info("✅ Botão de login clicado")
+        time.sleep(3)
 
-        # Aguardar redirecionamento
-        WebDriverWait(driver, 15).until(
-            lambda d: "login" not in d.current_url.lower() or
-                     len(d.find_elements(By.ID, "input-email")) == 0
-        )
-        
+        step_time = time.time()
+        login_button.click()
+        logger.info(f"✅ Botão de login clicado ({time.time() - step_time:.2f}s)")
+
+        # Aguardar redirecionamento - verificação mais robusta
+        step_time = time.time()
+        try:
+            WebDriverWait(driver, 20).until(
+                lambda d: "login" not in d.current_url.lower()
+            )
+            logger.info(f"✅ Redirecionado para: {driver.current_url}")
+            logger.info(f"⏱️ Redirecionamento: {time.time() - step_time:.2f}s")
+        except Exception as e:
+            logger.error(f"❌ Timeout ao aguardar redirecionamento")
+            logger.error(f"🔗 URL permaneceu em: {driver.current_url}")
+            raise Exception(f"Login falhou - não redirecionou da página de login: {driver.current_url}")
+
+        # Verificação adicional: confirmar que elementos de login não existem mais
+        login_elements = driver.find_elements(By.ID, "input-email")
+        if len(login_elements) > 0:
+            logger.error("❌ Elementos de login ainda presentes após redirecionamento")
+            raise Exception("Login falhou - elementos de login ainda visíveis")
+
+        total_time = time.time() - start_time
         logger.info("✅ Login realizado com sucesso!")
         logger.info(f"🔗 URL atual: {driver.current_url}")
+        logger.info(f"⏱️ TEMPO TOTAL DE LOGIN: {total_time:.2f}s")
         return True
     
     try:
@@ -313,14 +421,45 @@ def login_ecomhub(driver):
         
     except Exception as e:
         logger.error(f"❌ Erro no login após tentativas: {e}")
-        logger.error(f"🔗 URL atual: {driver.current_url}")
-        
+
         try:
-            driver.save_screenshot("login_error.png")
-            logger.info("📸 Screenshot salvo: login_error.png")
-        except:
-            pass
-            
+            logger.error(f"🔗 URL atual: {driver.current_url}")
+
+            # Screenshot
+            screenshot_path = f"login_error_{int(time.time())}.png"
+            driver.save_screenshot(screenshot_path)
+            logger.info(f"📸 Screenshot salvo: {screenshot_path}")
+
+            # Capturar HTML da página
+            try:
+                page_html = driver.page_source
+                html_path = f"login_error_{int(time.time())}.html"
+                with open(html_path, 'w', encoding='utf-8') as f:
+                    f.write(page_html)
+                logger.info(f"📄 HTML da página salvo: {html_path}")
+            except Exception as html_err:
+                logger.warning(f"⚠️ Não foi possível salvar HTML: {html_err}")
+
+            # Capturar logs do console do navegador
+            try:
+                console_logs = driver.get_log('browser')
+                if console_logs:
+                    logger.info("📋 Logs do console do navegador:")
+                    for log in console_logs[-10:]:  # Últimos 10 logs
+                        logger.info(f"   [{log['level']}] {log['message']}")
+            except Exception as log_err:
+                logger.warning(f"⚠️ Não foi possível capturar logs do console: {log_err}")
+
+            # Informações adicionais de debug
+            try:
+                cookies = driver.get_cookies()
+                logger.info(f"🍪 Cookies presentes: {[c['name'] for c in cookies]}")
+            except Exception as cookie_err:
+                logger.warning(f"⚠️ Não foi possível listar cookies: {cookie_err}")
+
+        except Exception as debug_err:
+            logger.error(f"❌ Erro ao capturar evidências de debug: {debug_err}")
+
         raise e
 
 def get_auth_cookies(driver):
