@@ -13,3 +13,9 @@ httpx==0.25.0
 
 # Security Dependencies
 slowapi==0.1.9
+
+# Monitoring Dependencies
+psutil==5.9.6
+
+# Testing Dependencies
+aiohttp==3.9.1
